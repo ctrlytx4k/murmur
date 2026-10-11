@@ -17,21 +17,22 @@ struct MurmurButtonStyle: ButtonStyle {
         configuration.label
             .font(.system(size: fontSize, weight: filled ? .semibold : .medium))
             .foregroundStyle(foreground)
-            .padding(.horizontal, height * 0.47)
+            .lineLimit(1)
+            .padding(.horizontal, fullWidth ? 8 : height * 0.47)
             .frame(maxWidth: fullWidth ? .infinity : nil)
             .frame(height: height)
             .background {
                 if filled {
-                    Capsule().fill(fill)
+                    Pill().fill(fill)
                     // Top sheen.
-                    Capsule().fill(LinearGradient(colors: [.white.opacity(0.32), .white.opacity(0)], startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.6)))
-                    Capsule().strokeBorder(.white.opacity(0.25), lineWidth: 0.5)
+                    Pill().fill(LinearGradient(colors: [.white.opacity(0.32), .white.opacity(0)], startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.6)))
+                    Pill().strokeBorder(.white.opacity(0.25), lineWidth: 0.5)
                 }
             }
             .modifier(ConditionalChip(enabled: !filled))
             .shadow(color: filled ? fill.opacity(0.22) : .clear, radius: 6, y: 4)
             .opacity(isEnabled ? (configuration.isPressed ? 0.75 : 1) : 0.45)
-            .contentShape(Capsule())
+            .contentShape(Pill())
     }
 
     private var foreground: Color {
@@ -47,7 +48,7 @@ struct MurmurButtonStyle: ButtonStyle {
 private struct ConditionalChip: ViewModifier {
     let enabled: Bool
     func body(content: Content) -> some View {
-        if enabled { content.chipCapsule() } else { content }
+        if enabled { content.chipPill() } else { content }
     }
 }
 
@@ -91,9 +92,9 @@ struct MurmurToggleStyle: ToggleStyle {
         Button {
             configuration.isOn.toggle()
         } label: {
-            Capsule()
+            Pill()
                 .fill(configuration.isOn ? Tokens.accent : Tokens.controlStrong)
-                .overlay(Capsule().strokeBorder(Tokens.stroke, lineWidth: 0.5))
+                .overlay(Pill().strokeBorder(Tokens.stroke, lineWidth: 0.5))
                 .frame(width: 42, height: 26)
                 .overlay(alignment: configuration.isOn ? .trailing : .leading) {
                     Circle()
@@ -130,14 +131,14 @@ struct SegmentedPicker<Value: Hashable>: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: height)
                         .modifier(ConditionalChip(enabled: on))
-                        .contentShape(Capsule())
+                        .contentShape(Pill())
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
         .padding(3)
-        .background(Tokens.control, in: Capsule())
+        .background(Tokens.control, in: Pill())
     }
 }
 
@@ -224,7 +225,7 @@ struct Waveform: View {
         HStack(alignment: .center, spacing: 2) {
             ForEach(Array(levels.enumerated()), id: \.offset) { _, level in
                 let quiet = level < 0.06
-                Capsule()
+                Pill()
                     .fill(color.opacity(quiet ? 0.45 : 0.95))
                     .frame(width: 1.5, height: quiet ? 1.5 : max(3, CGFloat(level) * maxHeight))
             }
@@ -250,7 +251,7 @@ struct StatusChip: View {
         .foregroundStyle(color)
         .padding(.horizontal, 11)
         .frame(height: 26)
-        .background(background, in: Capsule())
+        .background(background, in: Pill())
     }
 }
 

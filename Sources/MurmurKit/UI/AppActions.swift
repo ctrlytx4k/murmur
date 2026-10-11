@@ -1,0 +1,38 @@
+import SwiftUI
+
+/// What the views can ask the app to do. Keeps window management out of the views.
+struct AppActions {
+    var openSettings: () -> Void = {}
+    var openOnboarding: (Permission?) -> Void = { _ in }
+    var showAbout: () -> Void = {}
+    var closeDropdown: () -> Void = {}
+    var quit: () -> Void = {}
+}
+
+private struct AppActionsKey: EnvironmentKey {
+    static let defaultValue = AppActions()
+}
+
+extension EnvironmentValues {
+    var appActions: AppActions {
+        get { self[AppActionsKey.self] }
+        set { self[AppActionsKey.self] = newValue }
+    }
+}
+
+enum AppInfo {
+    static var version: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0" }
+    /// Shown as "Read the code" in onboarding. Set once the repository has its final name.
+    static let repository: URL? = nil
+}
+
+/// m:ss since a start date, ticking once a second.
+struct ElapsedTime: View {
+    let since: Date
+    var body: some View {
+        TimelineView(.periodic(from: since, by: 1)) { context in
+            let seconds = max(0, Int(context.date.timeIntervalSince(since)))
+            Text("\(seconds / 60):\(String(format: "%02d", seconds % 60))")
+        }
+    }
+}

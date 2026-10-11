@@ -52,3 +52,16 @@ struct AppIconTile: View {
         .accessibilityHidden(true)
     }
 }
+
+/// A capsule built from a plain rounded rectangle. SwiftUI's own Capsule leaves a
+/// stray hairline beside the end caps when it is inset for a thin border.
+nonisolated struct Pill: InsettableShape {
+    var inset: CGFloat = 0
+
+    func path(in rect: CGRect) -> Path {
+        let r = rect.insetBy(dx: inset, dy: inset)
+        return Path(roundedRect: r, cornerRadius: min(r.width, r.height) / 2, style: .circular)
+    }
+
+    func inset(by amount: CGFloat) -> Pill { Pill(inset: inset + amount) }
+}

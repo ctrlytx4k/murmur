@@ -55,11 +55,11 @@ extension View {
         modifier(GlassSurface(shape: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)))
     }
 
-    func glassCapsule() -> some View { modifier(GlassSurface(shape: Capsule())) }
+    func glassPill() -> some View { modifier(GlassSurface(shape: Pill())) }
 
     func chipSurface(cornerRadius: CGFloat) -> some View {
         modifier(ChipSurface(shape: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)))
     }
 
-    func chipCapsule() -> some View { modifier(ChipSurface(shape: Capsule())) }
+    func chipPill() -> some View { modifier(ChipSurface(shape: Pill())) }
 }
