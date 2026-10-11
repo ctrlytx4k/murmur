@@ -34,56 +34,35 @@ final class FloatingPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
     }
 
-    private var onResize: ((CGSize) -> Void)?
-    private var measure: (() -> CGSize)?
-    private var lastSize = CGSize.zero
+    private var onPlace: ((CGSize) -> Void)?
+    private var canvas: CGSize?
 
-    func setContent(_ view: some View, onResize: @escaping (CGSize) -> Void) {
-        let root = view
-            .shadow(color: .black.opacity(0.16), radius: 18, y: 10)
-            .padding(Self.margin)
-            .fixedSize()
-            .onGeometryChange(for: CGSize.self) { $0.size } action: { [weak self] in self?.resize(to: $0) }
-        let host = NSHostingController(rootView: AnyView(root))
-        // The panel sizes itself (below). Left to its defaults, the hosting view also resizes the window
-        // on every SwiftUI layout pass, from the corner, which made the card slide and jump once a second.
-        host.sizingOptions = []
-        contentViewController = host
-        self.onResize = onResize
-        measure = { [weak host] in host?.sizeThatFits(in: CGSize(width: 4000, height: 4000)) ?? .zero }
-        sizeToContent()
-    }
-
-    /// For content whose size changes while it is on screen (the overlay). The panel is a fixed, transparent
+    /// The content changes size while it is on screen, so the panel is a fixed, transparent
     /// canvas and the content is pinned to one edge inside it, so nothing ever resizes or moves the window:
     /// a card that grows simply grows within the canvas.
-    func setContent(_ view: some View, canvas: CGSize, alignment: Alignment, onPlace: @escaping (CGSize) -> Void) {
+    func setContent(
+        _ view: some View, canvas: CGSize, alignment: Alignment, onBackgroundClick: (() -> Void)? = nil, onPlace: @escaping (CGSize) -> Void
+    ) {
         let root = view
             .shadow(color: .black.opacity(0.16), radius: 18, y: 10)
             .padding(Self.margin)
             .frame(width: canvas.width, height: canvas.height, alignment: alignment)
+            .background {
+                // Clicks on the empty canvas normally fall through to the app behind. If one lands here anyway, treat it as a click outside.
+                if let onBackgroundClick { Color.clear.contentShape(Rectangle()).onTapGesture(perform: onBackgroundClick) }
+            }
         let host = NSHostingController(rootView: AnyView(root))
         host.sizingOptions = []
         contentViewController = host
-        onResize = onPlace
-        measure = { canvas }
+        self.onPlace = onPlace
+        self.canvas = canvas
         sizeToContent()
     }
 
-    /// The panel starts at zero size, and a zero-size window never lays out its content,
-    /// so the size has to be asked for rather than waited on.
+    /// Sizes the panel to its canvas and asks the owner to place it. Called each time it is shown,
+    /// because the anchor (the menu bar icon, the screen) may have moved.
     func sizeToContent() {
-        // Always place when asked directly: the anchor (the menu bar icon, the screen) may have moved
-        // even though the size has not.
-        if let size = measure?() { resize(to: size, force: true) }
-    }
-
-    /// From layout: moves only when the size really changed, so a ticking timer or a level meter never nudges the panel.
-    private func resize(to size: CGSize, force: Bool = false) {
-        let rounded = CGSize(width: size.width.rounded(.up), height: size.height.rounded(.up))
-        guard rounded.width > 0, force || rounded != lastSize else { return }
-        lastSize = rounded
-        onResize?(rounded)
+        if let canvas { onPlace?(canvas) }
     }
 
     static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
@@ -160,7 +139,10 @@ final class StatusItemController: NSObject {
         super.init()
         var actions = actions
         actions.closeDropdown = { [weak self] in self?.close(immediately: true) }
-        panel.setContent(DropdownView(stores: stores).environment(\.appActions, actions)) { [weak self] size in
+        panel.setContent(
+            DropdownView(stores: stores).environment(\.appActions, actions), canvas: Self.canvas, alignment: .top,
+            onBackgroundClick: { [weak self] in self?.close() }
+        ) { [weak self] size in
             self?.place(size)
         }
         item.button?.target = self
@@ -169,6 +151,10 @@ final class StatusItemController: NSObject {
         NotificationCenter.default.addObserver(self, selector: #selector(panelResignedKey), name: NSWindow.didResignKeyNotification, object: panel)
         observeChanges { [weak self] in self?.render() }
     }
+
+    /// The 340 pt dropdown plus shadow room, and taller than its tallest state. The dropdown changes height
+    /// with the dictation state; resizing the window to follow made it jump and ride up over the menu bar.
+    private static let canvas = CGSize(width: 340 + 2 * FloatingPanel.margin, height: 860)
 
     var menuBarState: MenuBarState {
         switch controller.state {
@@ -255,7 +241,8 @@ final class StatusItemController: NSObject {
     }
 
     /// Centered under the icon. Near the screen edge it slides in to stay on screen,
-    /// which gives the right-aligned placement the mockup shows.
+    /// which gives the right-aligned placement the mockup shows. Runs when the dropdown opens,
+    /// so it stays put while open even if the icon moves (the recording timer widens it).
     private func place(_ size: CGSize) {
         guard size.width > 0, let buttonWindow = item.button?.window, let screen = buttonWindow.screen ?? NSScreen.main else { return }
         let anchor = buttonWindow.frame
