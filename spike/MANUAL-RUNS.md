@@ -2,7 +2,13 @@
 
 Throwaway. Everything here writes JSON lines to `spike/results/`. Logs hold timings, counts, type names and the test transcripts only: no clipboard contents, no paths, no audio.
 
-Run all commands from `spike/` in Terminal. Build first:
+The quick way is the guided script, which walks through every step below and skips ones already done:
+
+```bash
+spike/scripts/run-manual.sh
+```
+
+The rest of this page is the same steps by hand. Run them from `spike/` in Terminal. Build first:
 
 ```bash
 swift build -c release
