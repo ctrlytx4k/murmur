@@ -6,6 +6,7 @@ struct AppActions {
     var openHistory: () -> Void = {}
     var openOnboarding: (Permission?) -> Void = { _ in }
     var showAbout: () -> Void = {}
+    var showAcknowledgements: () -> Void = {}
     var closeDropdown: () -> Void = {}
     var quit: () -> Void = {}
 }

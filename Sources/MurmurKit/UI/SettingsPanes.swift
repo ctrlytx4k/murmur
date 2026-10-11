@@ -83,14 +83,16 @@ struct VoiceEnginePane: View {
                         Button("Use") { settings.modelID = model.id }.buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5))
                     }
                 case .available:
-                    Button { stores.catalog.simulateDownload(model.id) } label: { Label("Download", systemImage: "arrow.down.to.line") }
+                    Button { stores.catalog.requestDownload(model.id) } label: { Label("Download", systemImage: "arrow.down.to.line") }
                         .buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5))
                 case .downloading(let progress):
                     VStack(alignment: .leading, spacing: 4) {
                         ProgressBar(value: progress, height: 5)
                         Text("\(Int(progress * 100))%").font(.system(size: 10.5)).monospacedDigit().foregroundStyle(Tokens.labelTertiary)
                     }
-                    IconButton(symbol: "xmark", label: "Cancel download", tint: Tokens.label, chip: true) { stores.catalog.cancelDownload(model.id) }
+                    if !stores.catalog.downloadsAreReal {
+                        IconButton(symbol: "xmark", label: "Cancel download", tint: Tokens.label, chip: true) { stores.catalog.cancelDownload(model.id) }
+                    }
                 case .unavailable(let why):
                     Text(why).font(.system(size: 11)).foregroundStyle(Tokens.labelTertiary).multilineTextAlignment(.trailing)
                 }
@@ -323,6 +325,9 @@ struct AdvancedPane: View {
             SwitchRow(title: "Debug log", subtitle: "Timing and errors only, never audio or text", first: true, isOn: bind(settings, \.debugLog))
             SettingsRow(title: "Onboarding", subtitle: "Walk through the welcome and permission steps again") {
                 Button("Show Again") { actions.openOnboarding(nil) }.buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5))
+            }
+            SettingsRow(title: "Acknowledgements", subtitle: "The open-source speech engine and model Murmur is built on") {
+                Button("Show") { actions.showAcknowledgements() }.buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5))
             }
             SettingsRow(title: "Diagnostics", subtitle: "Saves a file you can attach to a bug report. Nothing is sent automatically.") {
                 Button("Export…") { exportDiagnostics() }.buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5))

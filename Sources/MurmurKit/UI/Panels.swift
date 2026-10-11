@@ -121,7 +121,7 @@ final class StatusItemController: NSObject {
         self.controller = stores.controller
         super.init()
         var actions = actions
-        actions.closeDropdown = { [weak self] in self?.close() }
+        actions.closeDropdown = { [weak self] in self?.close(immediately: true) }
         panel.setContent(DropdownView(stores: stores).environment(\.appActions, actions)) { [weak self] size in
             self?.place(size)
         }
@@ -198,10 +198,16 @@ final class StatusItemController: NSObject {
         }
     }
 
-    func close() {
+    func close(immediately: Bool = false) {
         if let outsideClicks { NSEvent.removeMonitor(outsideClicks) }
         outsideClicks = nil
-        panel.fadeOut()
+        if immediately {
+            // Gives keyboard focus back to the app behind at once, before any text is inserted.
+            panel.alphaValue = 0
+            panel.orderOut(nil)
+        } else {
+            panel.fadeOut()
+        }
     }
 
     @objc private func panelResignedKey() {

@@ -5,6 +5,7 @@ import SwiftUI
 ///   --demo               simulated services, to walk through the interface
 ///   --onboarding         show onboarding even if it was completed
 ///   --snapshots <dir>    render every screen to PNG files and exit
+///   --selftest <audio>   transcribe a file with both real engines, print the result, and exit
 ///   --tour               with --demo: open each surface in turn, then quit (a smoke test)
 public final class MurmurApp: NSObject, NSApplicationDelegate {
     private let arguments: [String]
@@ -14,6 +15,9 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
     private let navigation = SettingsNavigation()
     private var historyWindow: NSWindow?
     private var actions = AppActions()
+    private var hotkeys: LiveHotkeyService?
+    private var router: EngineRouter?
+    private var lastSoundState: DictationState = .idle
     private var statusItem: StatusItemController!
     private var overlay: OverlayController!
     private var settingsWindow: NSWindow?
@@ -27,6 +31,10 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
     public static func main() {
         let app = NSApplication.shared
         let delegate = MurmurApp()
+        if let index = delegate.arguments.firstIndex(of: "--selftest"), delegate.arguments.count > index + 1 {
+            SelfTest.run(clip: delegate.arguments[index + 1])
+            return
+        }
         if let index = delegate.arguments.firstIndex(of: "--snapshots"), delegate.arguments.count > index + 1 {
             Snapshots.render(to: URL(fileURLWithPath: delegate.arguments[index + 1]))
             return
@@ -43,24 +51,34 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         settings = SettingsStore(defaults: defaults)
         let history = HistoryStore(defaults: defaults)
         history.prune(retention: settings.retention)
-        // The real audio, transcription and insertion services arrive once the spike report says go.
-        // Until then every take ends in a visible "not available" error rather than pretending.
-        controller = DictationController(
-            audio: demo ? DemoAudio() : UnavailableAudioCapture(),
-            engine: demo ? DemoEngine() : UnavailableTranscriptionEngine(),
-            insertion: demo ? DemoInsertion() : UnavailableTextInsertion(),
-            permissions: demo ? DemoPermissions() : LivePermissionsService(),
-            settings: settings,
-            cleanup: demo ? DemoCleanup() : nil,
-            history: history,
-            frontmostApp: {
-                // In the demo there is always somewhere for the text to "go".
-                DictationController.systemFrontmostApp() ?? (demo ? TargetApp(name: "Notes", bundleIdentifier: "com.apple.Notes") : nil)
-            })
+        let dictionary = DictionaryStore(defaults: defaults)
+        let catalog: ModelCatalog
+        if demo {
+            // Simulated services: nothing is recorded and nothing is typed.
+            controller = DictationController(
+                audio: DemoAudio(), engine: DemoEngine(), insertion: DemoInsertion(), permissions: DemoPermissions(),
+                settings: settings, cleanup: DemoCleanup(), history: history, dictionary: dictionary,
+                frontmostApp: { DictationController.systemFrontmostApp() ?? TargetApp(name: "Notes", bundleIdentifier: "com.apple.Notes") })
+            catalog = ModelCatalog(parakeetStatus: .available)
+        } else {
+            let router = EngineRouter(settings: settings)
+            let audio = LiveAudioCapture()
+            controller = DictationController(
+                audio: audio, engine: router, insertion: PasteInsertion(settings: settings), permissions: LivePermissionsService(),
+                settings: settings, history: history, dictionary: dictionary)
+            audio.onDeviceChange = { [weak self] message in self?.controller.noteDeviceChange(message) }
+            catalog = ModelCatalog(parakeetStatus: router.parakeet.isInstalled ? .installed : .available)
+            catalog.onDownload = { [weak self] _ in self?.prepareParakeet(download: true) }
+            self.router = router
+
+            let hotkeys = LiveHotkeyService()
+            hotkeys.onEvent = { [weak self] event in self?.controller.hotkey(event) }
+            hotkeys.onAction = { [weak self] action in self?.perform(action) }
+            self.hotkeys = hotkeys
+        }
         stores = Stores(
-            controller: controller, settings: settings, dictionary: DictionaryStore(defaults: defaults), history: history,
-            network: NetworkLog(defaults: defaults), catalog: ModelCatalog(parakeetStatus: demo ? .available : .unavailable("Arrives with the transcription engine")),
-            isDemo: demo)
+            controller: controller, settings: settings, dictionary: dictionary, history: history,
+            network: NetworkLog(defaults: defaults), catalog: catalog, isDemo: demo)
         if demo {
             DemoData.seed(stores)
             settings.cleanupEnabled = true
@@ -75,9 +93,11 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             openHistory: { [weak self] in self?.showHistory() },
             openOnboarding: { [weak self] permission in self?.showOnboarding(at: permission.map(OnboardingStep.step(for:)) ?? .welcome) },
             showAbout: { [weak self] in self?.showAbout() },
+            showAcknowledgements: { [weak self] in self?.showAcknowledgements() },
             quit: { NSApp.terminate(nil) })
         statusItem = StatusItemController(stores: stores, actions: actions)
         overlay = OverlayController(stores: stores, actions: actions)
+        if !demo { observeChanges { [weak self] in self?.syncServices() } }
 
         // Permission state is never cached: re-read it while the app runs so the icon stays honest.
         let poll = Timer(timeInterval: 3, repeats: true) { [weak self] _ in
@@ -117,6 +137,79 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
     }
 
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    // MARK: services
+
+    /// Keeps the hotkey tap, the loaded speech model and the feedback sounds in step with settings,
+    /// permissions and the dictation state. Re-runs whenever any of those change.
+    private func syncServices() {
+        guard let hotkeys, let router else { return }
+        let bindings = settings.hotkeyBindings
+        if hotkeys.isRunning {
+            hotkeys.update(bindings: bindings)
+        } else if controller.permissions.accessibility {
+            // The tap needs Accessibility. This runs again the moment the permission is granted.
+            try? hotkeys.start(bindings: bindings)
+        }
+        hotkeys.setRecording(controller.state.isRecording)
+
+        let state = controller.state
+        if settings.soundsEnabled, state != lastSoundState {
+            let names: (start: String, stop: String) = switch settings.soundSet {
+            case .soft: ("Tink", "Pop")
+            case .click: ("Morse", "Bottle")
+            case .chime: ("Glass", "Hero")
+            }
+            if state.isRecording { NSSound(named: names.start)?.play() } else if lastSoundState.isRecording, state == .processing { NSSound(named: names.stop)?.play() }
+        }
+        lastSoundState = state
+
+        if settings.modelID == "parakeet-v3" {
+            if router.parakeet.isInstalled, !router.parakeet.isLoaded { prepareParakeet(download: false) }
+        } else {
+            _ = settings.language
+            Task { try? await router.apple.prepare() }
+        }
+    }
+
+    /// Loads Parakeet, downloading it first when asked. Progress shows in Settings and in the overlay.
+    private func prepareParakeet(download: Bool) {
+        guard let router, router.parakeet.progress == nil, !router.parakeet.isLoaded else { return }
+        let catalog = stores.catalog
+        if download {
+            guard !settings.offlineMode else { return catalog.setStatus(.unavailable("Offline mode is on (Settings › Privacy)"), for: "parakeet-v3") }
+            catalog.setStatus(.downloading(0), for: "parakeet-v3")
+        }
+        Task {
+            do {
+                try await router.parakeet.prepare { progress in
+                    if download { catalog.setStatus(.downloading(progress), for: "parakeet-v3") }
+                }
+                catalog.setStatus(.installed, for: "parakeet-v3")
+                if download {
+                    if self.settings.logsNetworkActivity {
+                        self.stores.network.record(host: "huggingface.co", reason: "Model download · parakeet-v3", bytes: 480_000_000)
+                    }
+                    self.settings.modelID = "parakeet-v3"
+                }
+            } catch {
+                catalog.setStatus(router.parakeet.isInstalled ? .installed : .available, for: "parakeet-v3")
+            }
+        }
+    }
+
+    private func perform(_ action: HotkeyAction) {
+        switch action {
+        case .cycleMode: settings.mode = settings.mode.next
+        case .reinsertLast: controller.reinsertLast()
+        case .openHistory: showHistory()
+        }
+    }
+
+    private func showAcknowledgements() {
+        let bundled = Bundle.main.url(forResource: "THIRD-PARTY-NOTICES", withExtension: "md")
+        NSWorkspace.shared.open(bundled ?? URL(string: "https://github.com/FluidInference/FluidAudio")!)
+    }
 
     // MARK: appearance
 

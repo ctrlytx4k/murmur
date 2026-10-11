@@ -82,6 +82,8 @@ struct DropdownView: View {
         let busy = controller.state == .processing
         return VStack(alignment: .leading, spacing: 6) {
             Button {
+                // Close first: the panel holds keyboard focus, and the text has to land in the app behind it.
+                actions.closeDropdown()
                 controller.toggle()
             } label: {
                 HStack(spacing: 10) {
