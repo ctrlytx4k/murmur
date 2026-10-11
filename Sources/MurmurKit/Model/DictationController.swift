@@ -28,6 +28,8 @@ public final class DictationController {
     @ObservationIgnored private let settings: SettingsStore
     @ObservationIgnored private let cleanup: (any TextCleanupService)?
     @ObservationIgnored private let history: HistoryStore?
+    @ObservationIgnored private let dictionary: DictionaryStore?
+    @ObservationIgnored private let maxLengthScale: Double
     @ObservationIgnored private var recordingStarted = Date.distantPast
     @ObservationIgnored private let frontmostApp: @MainActor () -> TargetApp?
     @ObservationIgnored private let copyToClipboard: @MainActor (String) -> Void
@@ -51,6 +53,8 @@ public final class DictationController {
         settings: SettingsStore,
         cleanup: (any TextCleanupService)? = nil,
         history: HistoryStore? = nil,
+        dictionary: DictionaryStore? = nil,
+        maxLengthScale: Double = 1,
         frontmostApp: @escaping @MainActor () -> TargetApp? = DictationController.systemFrontmostApp,
         copyToClipboard: @escaping @MainActor (String) -> Void = DictationController.systemCopy,
         now: @escaping () -> Date = Date.init,
@@ -64,6 +68,8 @@ public final class DictationController {
         self.settings = settings
         self.cleanup = cleanup
         self.history = history
+        self.dictionary = dictionary
+        self.maxLengthScale = maxLengthScale
         self.frontmostApp = frontmostApp
         self.copyToClipboard = copyToClipboard
         self.now = now
@@ -81,6 +87,7 @@ public final class DictationController {
         case (.up, .pushToTalk): stopAndInsert()
         case (.down, .toggle): toggle()
         case (.up, .toggle): break
+        case (.commit, _): stopAndInsert()
         }
     }
 
@@ -93,6 +100,11 @@ public final class DictationController {
         refreshPermissions()
         guard permissions.microphone else { return fail(.microphoneDenied) }
         guard permissions.accessibility else { return fail(.accessibilityDenied) }
+        switch engine.readiness {
+        case .ready: break
+        case .preparing(let name, let progress): return fail(.modelNotReady(name: name, progress: progress))
+        case .unavailable(let reason): return fail(.engineUnavailable(reason))
+        }
 
         target = frontmostApp()
         levels = [Float](repeating: 0, count: Self.levelCount)
@@ -107,7 +119,13 @@ public final class DictationController {
         lastSoundAt = now()
         recordingStarted = now()
         deviceNotice = nil
-        set(.recording(since: now()))
+        let token = set(.recording(since: now()))
+        // Recording stops and inserts when the maximum length is reached.
+        let limit = settings.maxLength.seconds * maxLengthScale
+        Task {
+            try? await Task.sleep(for: .seconds(limit))
+            if self.stateToken == token { self.stopAndInsert() }
+        }
     }
 
     public func stopAndInsert() {
@@ -163,19 +181,25 @@ public final class DictationController {
     // MARK: the take
 
     private func finish(_ token: Int) async {
-        let raw: String
+        let heard: String
         let seconds: Double
         do {
             let clip = try await audio.stop()
             seconds = max(clip.duration, now().timeIntervalSince(recordingStarted))
-            raw = try await engine.transcribe(clip).trimmingCharacters(in: .whitespacesAndNewlines)
+            heard = try await engine.transcribe(clip).trimmingCharacters(in: .whitespacesAndNewlines)
         } catch is ServiceUnavailable {
             return fail(.engineUnavailable("No transcription engine is connected in this build yet."), ifStill: token)
         } catch {
             return fail(.transcriptionFailed(error.localizedDescription), ifStill: token)
         }
         guard token == stateToken else { return }  // cancelled meanwhile
-        guard !raw.isEmpty else { return fail(.nothingHeard) }
+        guard !heard.isEmpty else { return fail(.nothingHeard) }
+
+        // A snippet trigger replaces the whole take and skips cleanup.
+        if let dictionary, let snippet = TextProcessor.snippet(for: heard, in: dictionary.snippets) {
+            return await insert(TextProcessor.expand(snippet.text, now: now()), token: token, raw: nil, mode: .raw, audioSeconds: seconds)
+        }
+        let raw = dictionary.map { TextProcessor.applyDictionary($0.entries, to: heard, app: target?.name) } ?? heard
 
         // Cleanup is optional and never blocks a take: if it fails, the raw text goes in.
         var text = raw

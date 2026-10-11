@@ -163,6 +163,19 @@ public final class ModelCatalog {
 
     public func model(_ id: String) -> SpeechModel? { models.first { $0.id == id } }
 
+    /// Set by the app when real downloads exist. Without it (the demo), downloads are simulated.
+    @ObservationIgnored public var onDownload: ((String) -> Void)?
+    public var downloadsAreReal: Bool { onDownload != nil }
+
+    public func requestDownload(_ id: String) {
+        if let onDownload { onDownload(id) } else { simulateDownload(id) }
+    }
+
+    public func setStatus(_ status: SpeechModel.Status, for id: String) {
+        guard let index = models.firstIndex(where: { $0.id == id }), models[index].status != status else { return }
+        models[index].status = status
+    }
+
     /// Demo only: walks the progress bar. Real downloads belong to the transcription engine.
     func simulateDownload(_ id: String) {
         guard let index = models.firstIndex(where: { $0.id == id }), models[index].status == .available else { return }

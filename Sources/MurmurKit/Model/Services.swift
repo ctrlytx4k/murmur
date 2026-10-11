@@ -10,12 +10,43 @@ public nonisolated struct AudioClip: Sendable {
     public var duration: TimeInterval { Double(samples.count) / sampleRate }
 }
 
-public nonisolated enum HotkeyEvent: Sendable { case down, up, cancel }
+public nonisolated enum HotkeyEvent: Sendable {
+    /// The dictation shortcut went down or came up.
+    case down, up
+    /// Esc while recording.
+    case cancel
+    /// Return while recording in toggle mode: stop and insert.
+    case commit
+}
 
-/// Owns the event tap. Its callback only enqueues; events arrive here on the main actor.
+public nonisolated enum HotkeyAction: Sendable { case cycleMode, reinsertLast, openHistory }
+
+public nonisolated struct HotkeyBindings: Equatable, Sendable {
+    public var dictation: Shortcut
+    public var cycleMode: Shortcut
+    public var reinsert: Shortcut
+    public var history: Shortcut
+    /// Toggle mode: Return ends the take.
+    public var returnCommits: Bool
+
+    public init(dictation: Shortcut, cycleMode: Shortcut, reinsert: Shortcut, history: Shortcut, returnCommits: Bool) {
+        self.dictation = dictation
+        self.cycleMode = cycleMode
+        self.reinsert = reinsert
+        self.history = history
+        self.returnCommits = returnCommits
+    }
+}
+
+/// Owns the event tap. Its callback only decides and enqueues; events arrive here on the main actor.
 public protocol HotkeyService: AnyObject {
     var onEvent: ((HotkeyEvent) -> Void)? { get set }
-    func start(shortcut: Shortcut) throws
+    var onAction: ((HotkeyAction) -> Void)? { get set }
+    var isRunning: Bool { get }
+    func start(bindings: HotkeyBindings) throws
+    func update(bindings: HotkeyBindings)
+    /// While recording, Esc cancels and (in toggle mode) Return commits.
+    func setRecording(_ recording: Bool)
     func stop()
 }
 
@@ -26,9 +57,22 @@ public protocol AudioCaptureService: AnyObject {
     func cancel()
 }
 
+public nonisolated enum EngineReadiness: Equatable, Sendable {
+    case ready
+    /// Downloading or loading. Progress is 0...1.
+    case preparing(name: String, progress: Double)
+    case unavailable(String)
+}
+
 public protocol TranscriptionEngine: AnyObject {
     var displayName: String { get }
+    /// Checked before a take starts, so the user is told up front instead of losing what they said.
+    var readiness: EngineReadiness { get }
     func transcribe(_ clip: AudioClip) async throws -> String
+}
+
+public extension TranscriptionEngine {
+    var readiness: EngineReadiness { .ready }
 }
 
 public nonisolated struct InsertionReceipt: Equatable, Sendable {
@@ -66,6 +110,7 @@ public final class UnavailableAudioCapture: AudioCaptureService {
 public final class UnavailableTranscriptionEngine: TranscriptionEngine {
     public init() {}
     public let displayName = "Not installed"
+    public var readiness: EngineReadiness { .unavailable("No transcription engine is connected in this build yet.") }
     public func transcribe(_ clip: AudioClip) async throws -> String { throw ServiceUnavailable() }
 }
 

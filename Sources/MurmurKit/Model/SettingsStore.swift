@@ -90,7 +90,16 @@ public final class SettingsStore {
         }
     }
     public enum InsertMethod: String, CaseIterable, Sendable { case pasting = "Pasting", typing = "Typing" }
-    public enum MaxLength: String, CaseIterable, Sendable { case one = "1 minute", five = "5 minutes", fifteen = "15 minutes", thirty = "30 minutes" }
+    public enum MaxLength: String, CaseIterable, Sendable { case one = "1 minute", five = "5 minutes", fifteen = "15 minutes", thirty = "30 minutes"
+        public var seconds: Double {
+            switch self {
+            case .one: 60
+            case .five: 300
+            case .fifteen: 900
+            case .thirty: 1800
+            }
+        }
+    }
 
     @ObservationIgnored private let defaults: UserDefaults
 
@@ -256,6 +265,10 @@ public final class SettingsStore {
             launchAtLoginError = "Couldn’t change this: \(error.localizedDescription)"
         }
         refreshLaunchAtLogin()
+    }
+
+    public var hotkeyBindings: HotkeyBindings {
+        HotkeyBindings(dictation: shortcut, cycleMode: cycleModeShortcut, reinsert: reinsertShortcut, history: historyShortcut, returnCommits: behavior == .toggle)
     }
 
     private func save(_ value: Any?, _ key: String) { defaults.set(value, forKey: key) }
