@@ -57,13 +57,15 @@ final class FloatingPanel: NSPanel {
     /// The panel starts at zero size, and a zero-size window never lays out its content,
     /// so the size has to be asked for rather than waited on.
     func sizeToContent() {
-        if let size = measure?() { resize(to: size) }
+        // Always place when asked directly: the anchor (the menu bar icon, the screen) may have moved
+        // even though the size has not.
+        if let size = measure?() { resize(to: size, force: true) }
     }
 
-    /// Moves only when the size really changed, so a ticking timer or a level meter never nudges the panel.
-    private func resize(to size: CGSize) {
+    /// From layout: moves only when the size really changed, so a ticking timer or a level meter never nudges the panel.
+    private func resize(to size: CGSize, force: Bool = false) {
         let rounded = CGSize(width: size.width.rounded(.up), height: size.height.rounded(.up))
-        guard rounded.width > 0, rounded != lastSize else { return }
+        guard rounded.width > 0, force || rounded != lastSize else { return }
         lastSize = rounded
         onResize?(rounded)
     }
