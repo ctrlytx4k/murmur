@@ -35,7 +35,8 @@ public final class SettingsStore {
         self.defaults = defaults
         shortcut = defaults.data(forKey: Key.shortcut).flatMap { try? JSONDecoder().decode(Shortcut.self, from: $0) } ?? .optionSpace
         behavior = defaults.string(forKey: Key.behavior).flatMap(Behavior.init) ?? .pushToTalk
-        appearance = defaults.string(forKey: Key.appearance).flatMap(Appearance.init) ?? .auto
+        // Light is the default design; dark and Auto are there for people who ask for them.
+        appearance = defaults.string(forKey: Key.appearance).flatMap(Appearance.init) ?? .light
         microphoneID = defaults.string(forKey: Key.microphone)
         hasCompletedOnboarding = defaults.bool(forKey: Key.onboarded)
     }

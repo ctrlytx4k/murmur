@@ -135,14 +135,25 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
     }
 
     private func makeWindow(_ view: some View, title: String) -> NSWindow {
-        let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
+        let host = NSHostingView(rootView: view)
+        // The content draws under the title bar. Without this the hosting view keeps the
+        // title bar inset, which leaves an unpainted strip along the bottom of the window.
+        host.safeAreaRegions = []
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: host.fittingSize),
+            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.title = title
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
+        // An empty unified toolbar lowers the traffic lights so they sit inside the sidebar, as in the mockup.
+        window.toolbar = NSToolbar()
+        window.toolbarStyle = .unified
+        window.backgroundColor = NSColor(Tokens.windowBackground)
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: view.ignoresSafeArea())
-        window.setContentSize(window.contentView?.fittingSize ?? .zero)
+        window.contentView = host
+        window.setContentSize(host.fittingSize)
         window.center()
         return window
     }

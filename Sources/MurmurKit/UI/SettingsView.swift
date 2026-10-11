@@ -132,7 +132,7 @@ private struct GeneralPane: View {
         }
 
         SettingsGroup(title: "Appearance") {
-            SettingsRow(title: "Appearance", subtitle: "Auto follows the system", showsDivider: false) {
+            SettingsRow(title: "Appearance", subtitle: "Light by default. Auto follows the system.", showsDivider: false) {
                 SegmentedPicker(
                     options: [(.light, "Light"), (.dark, "Dark"), (.auto, "Auto")],
                     selection: Binding(get: { settings.appearance }, set: { settings.appearance = $0 }),
