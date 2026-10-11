@@ -10,6 +10,10 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
     private let arguments: [String]
     private var settings: SettingsStore!
     private var controller: DictationController!
+    private var stores: Stores!
+    private let navigation = SettingsNavigation()
+    private var historyWindow: NSWindow?
+    private var actions = AppActions()
     private var statusItem: StatusItemController!
     private var overlay: OverlayController!
     private var settingsWindow: NSWindow?
@@ -34,7 +38,11 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         let demo = arguments.contains("--demo")
-        settings = SettingsStore()
+        // The demo keeps its own settings and sample data, so it never mixes with real use.
+        let defaults = demo ? (UserDefaults(suiteName: "app.murmur.Murmur.demo") ?? .standard) : .standard
+        settings = SettingsStore(defaults: defaults)
+        let history = HistoryStore(defaults: defaults)
+        history.prune(retention: settings.retention)
         // The real audio, transcription and insertion services arrive once the spike report says go.
         // Until then every take ends in a visible "not available" error rather than pretending.
         controller = DictationController(
@@ -43,21 +51,33 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             insertion: demo ? DemoInsertion() : UnavailableTextInsertion(),
             permissions: demo ? DemoPermissions() : LivePermissionsService(),
             settings: settings,
+            cleanup: demo ? DemoCleanup() : nil,
+            history: history,
             frontmostApp: {
                 // In the demo there is always somewhere for the text to "go".
                 DictationController.systemFrontmostApp() ?? (demo ? TargetApp(name: "Notes", bundleIdentifier: "com.apple.Notes") : nil)
             })
+        stores = Stores(
+            controller: controller, settings: settings, dictionary: DictionaryStore(defaults: defaults), history: history,
+            network: NetworkLog(defaults: defaults), catalog: ModelCatalog(parakeetStatus: demo ? .available : .unavailable("Arrives with the transcription engine")),
+            isDemo: demo)
+        if demo {
+            DemoData.seed(stores)
+            settings.cleanupEnabled = true
+            settings.modelID = "apple-speech"
+        }
 
         NSApp.mainMenu = makeMainMenu()
         observeChanges { [weak self] in self?.applyAppearance() }
 
-        let actions = AppActions(
-            openSettings: { [weak self] in self?.showSettings() },
+        actions = AppActions(
+            openSettings: { [weak self] pane in self?.showSettings(pane) },
+            openHistory: { [weak self] in self?.showHistory() },
             openOnboarding: { [weak self] permission in self?.showOnboarding(at: permission.map(OnboardingStep.step(for:)) ?? .welcome) },
             showAbout: { [weak self] in self?.showAbout() },
             quit: { NSApp.terminate(nil) })
-        statusItem = StatusItemController(controller: controller, settings: settings, actions: actions)
-        overlay = OverlayController(controller: controller, settings: settings)
+        statusItem = StatusItemController(stores: stores, actions: actions)
+        overlay = OverlayController(stores: stores, actions: actions)
 
         // Permission state is never cached: re-read it while the app runs so the icon stays honest.
         let poll = Timer(timeInterval: 3, repeats: true) { [weak self] _ in
@@ -84,8 +104,12 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         controller.stopAndInsert()
         await pause(3.5)
         statusItem.close()
-        showSettings()
-        await pause(2)
+        for pane in SettingsPane.allCases {
+            showSettings(pane)
+            await pause(0.6)
+        }
+        showHistory()
+        await pause(1.5)
         showOnboarding(at: .microphone)
         await pause(2)
         print("tour finished in state \(controller.state)")
@@ -102,15 +126,27 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         case .light: NSAppearance(named: .aqua)
         case .dark: NSAppearance(named: .darkAqua)
         }
+        let policy: NSApplication.ActivationPolicy = settings.showInDock ? .regular : .accessory
+        if NSApp.activationPolicy() != policy { NSApp.setActivationPolicy(policy) }
     }
 
     // MARK: windows
 
-    @objc private func showSettings() {
+    @objc private func showSettingsFromMenu() { showSettings(nil) }
+
+    private func showSettings(_ pane: SettingsPane?) {
+        if let pane { navigation.pane = pane }
         if settingsWindow == nil {
-            settingsWindow = makeWindow(SettingsView(controller: controller, settings: settings), title: "Murmur Settings")
+            settingsWindow = makeWindow(SettingsView(stores: stores, navigation: navigation).environment(\.appActions, actions), title: "Murmur Settings")
         }
         present(settingsWindow)
+    }
+
+    @objc private func showHistory() {
+        if historyWindow == nil {
+            historyWindow = makeWindow(HistoryView(stores: stores).environment(\.appActions, actions), title: "Murmur History")
+        }
+        present(historyWindow)
     }
 
     private func showOnboarding(at step: OnboardingStep) {
@@ -172,7 +208,8 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         let app = NSMenu()
         app.addItem(withTitle: "About Murmur", action: #selector(showAbout), keyEquivalent: "").target = self
         app.addItem(.separator())
-        app.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
+        app.addItem(withTitle: "Settings…", action: #selector(showSettingsFromMenu), keyEquivalent: ",").target = self
+        app.addItem(withTitle: "History", action: #selector(showHistory), keyEquivalent: "y").target = self
         app.addItem(.separator())
         app.addItem(withTitle: "Quit Murmur", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         main.addItem(submenuItem(app))

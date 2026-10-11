@@ -86,9 +86,9 @@ final class OverlayController {
     private let panel = FloatingPanel(level: .statusBar, allowsKey: false)
     private let controller: DictationController
 
-    init(controller: DictationController, settings: SettingsStore) {
-        self.controller = controller
-        panel.setContent(OverlayView(controller: controller, settings: settings)) { [weak self] size in
+    init(stores: Stores, actions: AppActions) {
+        self.controller = stores.controller
+        panel.setContent(OverlayView(stores: stores).environment(\.appActions, actions)) { [weak self] size in
             self?.place(size)
         }
         observeChanges { [weak self] in self?.update() }
@@ -117,12 +117,12 @@ final class StatusItemController: NSObject {
     private var shown: MenuBarState?
     private var outsideClicks: Any?
 
-    init(controller: DictationController, settings: SettingsStore, actions: AppActions) {
-        self.controller = controller
+    init(stores: Stores, actions: AppActions) {
+        self.controller = stores.controller
         super.init()
         var actions = actions
         actions.closeDropdown = { [weak self] in self?.close() }
-        panel.setContent(DropdownView(controller: controller, settings: settings).environment(\.appActions, actions)) { [weak self] size in
+        panel.setContent(DropdownView(stores: stores).environment(\.appActions, actions)) { [weak self] size in
             self?.place(size)
         }
         item.button?.target = self

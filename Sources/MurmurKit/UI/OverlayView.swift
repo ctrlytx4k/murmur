@@ -4,8 +4,12 @@ import SwiftUI
 /// The glass card that follows a take: listening, transcribing, inserted, or what went wrong.
 /// It shows where the text is going and never takes focus.
 struct OverlayView: View {
-    let controller: DictationController
-    let settings: SettingsStore
+    let stores: Stores
+    @Environment(\.appActions) private var actions
+
+    private var controller: DictationController { stores.controller }
+    private var settings: SettingsStore { stores.settings }
+    private var cleaning: Bool { settings.mode == .cleaned && settings.cleanupEnabled }
 
     var body: some View {
         Group {
@@ -13,11 +17,13 @@ struct OverlayView: View {
             case .recording(let since): listening(since: since)
             case .processing: processing
             case .inserted(let summary): inserted(summary)
+            case .error(.modelNotReady(let name, let progress)): modelCard(name: name, progress: progress)
             case .error(let error): errorCard(error)
             case .idle: EmptyView()
             }
         }
         .foregroundStyle(Tokens.label)
+        .id(settings.accent)
     }
 
     // MARK: listening
@@ -27,9 +33,22 @@ struct OverlayView: View {
             HStack(spacing: 6) {
                 targetLabel
                 Spacer()
+                modeMenu
+                moreMenu
             }
             .frame(height: 26)
             .padding(EdgeInsets(top: 10, leading: 12, bottom: 0, trailing: 10))
+
+            if let notice = controller.deviceNotice {
+                HStack(spacing: 10) {
+                    Image(systemName: "mic.slash").font(.system(size: 12, weight: .medium)).foregroundStyle(Tokens.warning)
+                    Text(notice).font(.system(size: 12.5)).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                .padding(EdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 12))
+                .background(Tokens.warningSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(EdgeInsets(top: 10, leading: 10, bottom: 2, trailing: 10))
+            }
 
             if controller.isSilent {
                 HStack(spacing: 10) {
@@ -74,7 +93,7 @@ struct OverlayView: View {
                 targetLabel
                 Spacer()
                 Spinner()
-                Text("Transcribing…").font(.mmSub).foregroundStyle(Tokens.labelTertiary)
+                Text(cleaning ? "Cleaning up…" : "Transcribing…").font(.mmSub).foregroundStyle(Tokens.labelTertiary)
             }
             .frame(height: 26)
             .padding(EdgeInsets(top: 10, leading: 12, bottom: 0, trailing: 14))
@@ -140,7 +159,81 @@ struct OverlayView: View {
         .accessibilityElement(children: .combine)
     }
 
+    // MARK: model not ready
+
+    private func modelCard(name: String, progress: Double) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                targetLabel
+                Spacer()
+                dismissButton
+            }
+            .frame(height: 26)
+            .padding(EdgeInsets(top: 10, leading: 12, bottom: 0, trailing: 10))
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Your model is still downloading").font(.system(size: 14, weight: .semibold))
+                ProgressBar(value: progress)
+                Text("\(name) · \(Int(progress * 100))%").font(.mmCallout).monospacedDigit().foregroundStyle(Tokens.labelTertiary)
+            }
+            .padding(EdgeInsets(top: 10, leading: 16, bottom: 6, trailing: 16))
+            HStack(spacing: 8) {
+                Spacer()
+                Button("Wait") { controller.dismissError() }.buttonStyle(MurmurButtonStyle(height: 30, fontSize: 12.5))
+                Button("Choose Another Model") {
+                    controller.dismissError()
+                    actions.openSettings(.voiceEngine)
+                }
+                .buttonStyle(MurmurButtonStyle(kind: .primary, height: 30, fontSize: 12.5))
+            }
+            .padding(EdgeInsets(top: 6, leading: 12, bottom: 12, trailing: 12))
+        }
+        .frame(width: 400)
+        .glassSurface(cornerRadius: Tokens.Radius.overlay)
+    }
+
     // MARK: pieces
+
+    private var modeMenu: some View {
+        Menu {
+            Picker("Mode", selection: bind(settings, \.mode)) {
+                ForEach(DictationMode.allCases, id: \.self) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.inline).labelsHidden()
+        } label: {
+            HStack(spacing: 4) {
+                Text(settings.mode.label).font(.system(size: 11.5, weight: .semibold))
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+            }
+            .foregroundStyle(Tokens.accentText)
+            .padding(EdgeInsets(top: 0, leading: 11, bottom: 0, trailing: 9))
+            .frame(height: 26).chipPill().contentShape(Pill())
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .accessibilityLabel("Mode, \(settings.mode.label)")
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Button("Cancel Dictation") { controller.cancel() }
+            Button("Open Settings…") { actions.openSettings(nil) }
+        } label: {
+            Image(systemName: "ellipsis").font(.system(size: 11, weight: .bold)).foregroundStyle(Tokens.labelSecondary)
+                .frame(width: 26, height: 26).chipPill().contentShape(Circle())
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .accessibilityLabel("More actions")
+    }
+
+    private var dismissButton: some View {
+        Button {
+            controller.dismissError()
+        } label: {
+            Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Tokens.labelSecondary)
+                .frame(width: 26, height: 26).chipPill()
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Dismiss")
+    }
 
     private var targetLabel: some View {
         HStack(spacing: 7) {

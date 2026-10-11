@@ -2,9 +2,13 @@ import SwiftUI
 
 /// The 340 pt glass panel under the menu bar icon.
 struct DropdownView: View {
-    let controller: DictationController
-    let settings: SettingsStore
+    let stores: Stores
     @Environment(\.appActions) private var actions
+
+    private var controller: DictationController { stores.controller }
+    private var settings: SettingsStore { stores.settings }
+    private var modelName: String { stores.catalog.model(settings.modelID)?.name ?? controller.engineName }
+    private var languageName: String { settings.autoDetectLanguage ? "Auto-detect" : settings.language }
 
     private var missing: [Permission] { controller.permissions.missing }
     private var blocked: Bool { !controller.permissions.microphone || !controller.permissions.accessibility }
@@ -14,9 +18,11 @@ struct DropdownView: View {
             header
             mainButton
             if controller.state.isRecording { liveCard }
+            modePicker
             divider.padding(.horizontal, 10)
             infoRows
             if let last = controller.lastTranscription, !controller.state.isRecording { lastCard(last) }
+            links
             permissions
             divider.padding(EdgeInsets(top: 8, leading: 10, bottom: 4, trailing: 10))
             menuRows
@@ -25,6 +31,7 @@ struct DropdownView: View {
         .frame(width: 340)
         .glassSurface(cornerRadius: Tokens.Radius.panel)
         .foregroundStyle(Tokens.label)
+        .id(settings.accent)
     }
 
     private var divider: some View { Rectangle().fill(Tokens.separator).frame(height: 1) }
@@ -33,15 +40,15 @@ struct DropdownView: View {
 
     private var status: (dot: Color, title: String, detail: String, pulsing: Bool) {
         switch controller.state {
-        case .recording: (Tokens.recording, "Listening…", controller.target.map { "typing into \($0.name)" } ?? "release to insert", true)
-        case .processing: (Tokens.accent, "Transcribing…", controller.engineName, false)
+        case .recording: (Tokens.recording, "Listening…", settings.mode.label, true)
+        case .processing: (Tokens.accent, "Transcribing…", modelName, false)
         case .inserted(let summary): (Tokens.success, "Inserted", "\(summary.wordCount) words into \(summary.appName)", false)
         case .error(let error): (error.isWarning ? Tokens.warning : Tokens.recording, "Needs attention", error.title, false)
         case .idle:
             if let first = missing.first {
                 (Tokens.warning, "Needs attention", "\(first.name.lowercased()) access is off", false)
             } else {
-                (Tokens.success, "Ready", controller.engineName, false)
+                (Tokens.success, "Ready", "\(modelName) · \(languageName)", false)
             }
         }
     }
@@ -123,13 +130,70 @@ struct DropdownView: View {
 
     // MARK: engine and microphone
 
+    private var modePicker: some View {
+        VStack(spacing: 6) {
+            HStack {
+                Text("Mode").fontWeight(.semibold)
+                Spacer()
+                Text("\(settings.cycleModeShortcut.keycaps.joined()) cycles")
+            }
+            .font(.system(size: 11)).foregroundStyle(Tokens.labelTertiary)
+            HStack(spacing: 2) {
+                ForEach(DictationMode.allCases, id: \.self) { mode in
+                    let on = settings.mode == mode
+                    Button {
+                        settings.mode = mode
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: mode.symbol).font(.system(size: 10.5, weight: .semibold))
+                            Text(mode.shortLabel).font(.system(size: 12, weight: on ? .semibold : .medium))
+                        }
+                        .foregroundStyle(on ? Tokens.label : Tokens.labelSecondary)
+                        .frame(maxWidth: .infinity).frame(height: 30)
+                        .background { if on { Pill().fill(Tokens.chip).overlay(Pill().strokeBorder(Tokens.stroke, lineWidth: 0.5)) } }
+                        .contentShape(Pill())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+            .padding(3)
+            .background(Tokens.control, in: Pill())
+        }
+        .padding(EdgeInsets(top: 0, leading: 8, bottom: 10, trailing: 8))
+    }
+
+    private var chevrons: some View {
+        Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Tokens.labelTertiary)
+    }
+
     private var infoRows: some View {
         VStack(spacing: 0) {
-            infoRow(symbol: "cpu", title: "Engine") {
-                Text(controller.engineName)
+            Button {
+                actions.closeDropdown()
+                actions.openSettings(.voiceEngine)
+            } label: {
+                infoRow(symbol: "cpu", title: "Model") {
+                    Text(modelName).lineLimit(1)
+                    chevrons
+                }
             }
+            .buttonStyle(HoverRowStyle())
             Menu {
-                Picker("Microphone", selection: Binding(get: { settings.microphoneID }, set: { settings.microphoneID = $0 })) {
+                Toggle("Auto-detect", isOn: bind(settings, \.autoDetectLanguage))
+                Picker("Language", selection: bind(settings, \.language)) {
+                    ForEach(SettingsStore.languages, id: \.self) { Text($0).tag($0) }
+                }
+                .pickerStyle(.inline).labelsHidden()
+            } label: {
+                infoRow(symbol: "globe", title: "Language") {
+                    Text(languageName)
+                    chevrons
+                }
+            }
+            .menuStyle(.button).buttonStyle(HoverRowStyle()).menuIndicator(.hidden)
+            Menu {
+                Picker("Microphone", selection: bind(settings, \.microphoneID)) {
                     Text("System Default").tag(String?.none)
                     ForEach(AudioDevices.inputs()) { device in Text(device.name).tag(String?.some(device.id)) }
                 }
@@ -142,7 +206,7 @@ struct DropdownView: View {
                     } else {
                         Text("No access").fontWeight(.semibold).foregroundStyle(Tokens.warning)
                     }
-                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Tokens.labelTertiary)
+                    chevrons
                 }
             }
             .menuStyle(.button)
@@ -151,6 +215,30 @@ struct DropdownView: View {
             .disabled(!controller.permissions.microphone)
         }
         .padding(.vertical, 6)
+    }
+
+    private var links: some View {
+        HStack(spacing: 2) {
+            link("History", "clock") { actions.openHistory() }
+            link("Dictionary", "character.book.closed") { actions.openSettings(.dictionary) }
+            link("Snippets", "curlybraces") { actions.openSettings(.dictionary) }
+            link("Settings", "gearshape") { actions.openSettings(nil) }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func link(_ title: String, _ symbol: String, action: @escaping () -> Void) -> some View {
+        Button {
+            actions.closeDropdown()
+            action()
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 16)).foregroundStyle(Tokens.label).frame(height: 19)
+                Text(title).font(.mmSub).foregroundStyle(Tokens.labelSecondary)
+            }
+            .frame(maxWidth: .infinity).frame(height: 58)
+        }
+        .buttonStyle(HoverRowStyle(cornerRadius: 14))
     }
 
     private func infoRow(symbol: String, title: String, @ViewBuilder value: () -> some View) -> some View {
@@ -171,7 +259,9 @@ struct DropdownView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Text("Last transcription").fontWeight(.semibold).foregroundStyle(Tokens.labelSecondary)
-                Text("· \(last.date.formatted(.relative(presentation: .named))) · \(last.appName)").foregroundStyle(Tokens.labelTertiary).lineLimit(1)
+                Text("· \(last.date.formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated))) · \(last.appName)").foregroundStyle(Tokens.labelTertiary).lineLimit(1)
+                Spacer(minLength: 4)
+                ModeTag(mode: last.mode)
             }
             .font(.system(size: 11))
             Text(last.text).font(.mmBody).lineSpacing(3).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
@@ -254,10 +344,7 @@ struct DropdownView: View {
 
     private var menuRows: some View {
         VStack(spacing: 0) {
-            menuRow("Settings…", shortcut: "⌘,") {
-                actions.closeDropdown()
-                actions.openSettings()
-            }
+            menuRow("Check for Updates…") {}.disabled(true).opacity(0.45)
             menuRow("About Murmur") {
                 actions.closeDropdown()
                 actions.showAbout()

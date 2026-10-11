@@ -2,7 +2,8 @@ import SwiftUI
 
 /// What the views can ask the app to do. Keeps window management out of the views.
 struct AppActions {
-    var openSettings: () -> Void = {}
+    var openSettings: (SettingsPane?) -> Void = { _ in }
+    var openHistory: () -> Void = {}
     var openOnboarding: (Permission?) -> Void = { _ in }
     var showAbout: () -> Void = {}
     var closeDropdown: () -> Void = {}
