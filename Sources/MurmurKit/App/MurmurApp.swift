@@ -144,7 +144,9 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
     /// permissions and the dictation state. Re-runs whenever any of those change.
     private func syncServices() {
         guard let hotkeys, let router else { return }
-        let bindings = settings.hotkeyBindings
+        var bindings = settings.hotkeyBindings
+        // A hands-free take ends with Return too, like toggle mode.
+        if controller.isLatched { bindings.returnCommits = true }
         if hotkeys.isRunning {
             hotkeys.update(bindings: bindings)
         } else if controller.permissions.accessibility {

@@ -102,6 +102,10 @@ public final class LiveHotkeyService: HotkeyService {
     private var shared: TapShared?
     private var watchdog: Timer?
     private var strikes = 0
+    /// Whether the hardware key state can be believed for the current press. It is sampled when the
+    /// press arrives: if the system already says "up" while we know the key is down, the reading is
+    /// useless for this key and the watchdog stays out of the way.
+    private var keyStateTrusted = false
     private var wakeObserver: NSObjectProtocol?
 
     public init() {}
@@ -190,7 +194,12 @@ public final class LiveHotkeyService: HotkeyService {
 
     private func receive(_ output: TapOutput) {
         switch output {
-        case .event(let event): onEvent?(event)
+        case .event(let event):
+            if event == .down, let key = shared?.config.withLock({ $0.bindings?.dictation.keyCode }) {
+                keyStateTrusted = CGEventSource.keyState(.hidSystemState, key: CGKeyCode(key))
+                strikes = 0
+            }
+            onEvent?(event)
         case .action(let action): onAction?(action)
         }
     }
@@ -198,12 +207,12 @@ public final class LiveHotkeyService: HotkeyService {
     private func checkForMissedRelease() {
         guard let shared else { return }
         let held: UInt16? = shared.config.withLock { $0.dictationDown ? $0.bindings?.dictation.keyCode : nil }
-        guard let held else { return strikes = 0 }
+        guard let held, keyStateTrusted else { return strikes = 0 }
         if CGEventSource.keyState(.hidSystemState, key: CGKeyCode(held)) {
             strikes = 0
         } else {
             strikes += 1
-            if strikes >= 2 {
+            if strikes >= 3 {
                 strikes = 0
                 shared.config.withLock { $0.dictationDown = false }
                 onEvent?(.up)

@@ -68,6 +68,7 @@ struct Harness {
         let box = box
         controller = DictationController(
             audio: audio, engine: engine, insertion: insertion, permissions: permissions, settings: settings,
+            tapThreshold: 0,
             frontmostApp: { TargetApp(name: "Notes") },
             copyToClipboard: { box.values.append($0) },
             insertedHold: .milliseconds(20), errorHold: .milliseconds(20))
@@ -109,6 +110,41 @@ struct Harness {
         h.controller.hotkey(.up)
         #expect(h.controller.state == .processing)
         await h.settle()
+    }
+
+    @Test func aQuickTapKeepsListeningUntilTheNextPress() async {
+        var clock = Date(timeIntervalSince1970: 1_000)
+        let insertion = FakeInsertion()
+        let settings = SettingsStore(defaults: UserDefaults(suiteName: "murmur-tests-\(UUID().uuidString)")!)
+        let controller = DictationController(
+            audio: FakeAudio(), engine: FakeEngine(), insertion: insertion, permissions: FakePermissions(), settings: settings,
+            frontmostApp: { nil }, copyToClipboard: { _ in }, now: { clock })
+
+        controller.hotkey(.down)
+        clock += 0.1
+        controller.hotkey(.up)
+        #expect(controller.state.isRecording && controller.isLatched)
+
+        // The next press ends the take; its release does nothing more.
+        clock += 3
+        controller.hotkey(.down)
+        #expect(controller.state == .processing && !controller.isLatched)
+        controller.hotkey(.up)
+        await controller.pendingWork?.value
+        #expect(insertion.inserted.count == 1)
+    }
+
+    @Test func aLongHoldIsPlainPushToTalk() async {
+        var clock = Date(timeIntervalSince1970: 1_000)
+        let settings = SettingsStore(defaults: UserDefaults(suiteName: "murmur-tests-\(UUID().uuidString)")!)
+        let controller = DictationController(
+            audio: FakeAudio(), engine: FakeEngine(), insertion: FakeInsertion(), permissions: FakePermissions(), settings: settings,
+            frontmostApp: { nil }, copyToClipboard: { _ in }, now: { clock })
+        controller.hotkey(.down)
+        clock += 2
+        controller.hotkey(.up)
+        #expect(controller.state == .processing)
+        await controller.pendingWork?.value
     }
 
     @Test func toggleIgnoresKeyUp() async {

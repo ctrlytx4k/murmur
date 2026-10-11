@@ -16,6 +16,8 @@ public final class DictationController {
     public private(set) var isSilent = false
     public private(set) var lastTranscription: Transcription?
     public private(set) var canUndoLast = false
+    /// Push-to-talk only: a quick tap started this take, so it keeps recording until the shortcut is pressed again.
+    public private(set) var isLatched = false
     /// A short notice shown in the overlay mid-take, such as a microphone that was unplugged.
     public private(set) var deviceNotice: String?
 
@@ -30,6 +32,8 @@ public final class DictationController {
     @ObservationIgnored private let history: HistoryStore?
     @ObservationIgnored private let dictionary: DictionaryStore?
     @ObservationIgnored private let maxLengthScale: Double
+    @ObservationIgnored private let tapThreshold: TimeInterval
+    @ObservationIgnored private var pressedAt = Date.distantPast
     @ObservationIgnored private var recordingStarted = Date.distantPast
     @ObservationIgnored private let frontmostApp: @MainActor () -> TargetApp?
     @ObservationIgnored private let copyToClipboard: @MainActor (String) -> Void
@@ -55,6 +59,7 @@ public final class DictationController {
         history: HistoryStore? = nil,
         dictionary: DictionaryStore? = nil,
         maxLengthScale: Double = 1,
+        tapThreshold: TimeInterval = 0.4,
         frontmostApp: @escaping @MainActor () -> TargetApp? = DictationController.systemFrontmostApp,
         copyToClipboard: @escaping @MainActor (String) -> Void = DictationController.systemCopy,
         now: @escaping () -> Date = Date.init,
@@ -70,6 +75,7 @@ public final class DictationController {
         self.history = history
         self.dictionary = dictionary
         self.maxLengthScale = maxLengthScale
+        self.tapThreshold = tapThreshold
         self.frontmostApp = frontmostApp
         self.copyToClipboard = copyToClipboard
         self.now = now
@@ -83,8 +89,21 @@ public final class DictationController {
     public func hotkey(_ event: HotkeyEvent) {
         switch (event, settings.behavior) {
         case (.cancel, _): cancel()
-        case (.down, .pushToTalk): start()
-        case (.up, .pushToTalk): stopAndInsert()
+        case (.down, .pushToTalk):
+            if state.isRecording, isLatched {
+                stopAndInsert()
+            } else {
+                pressedAt = now()
+                start()
+            }
+        case (.up, .pushToTalk):
+            // A quick tap is not a take. Keep listening hands-free until the shortcut is pressed again,
+            // rather than stopping at once with nothing said.
+            if state.isRecording, !isLatched, settings.doubleTapToLock, now().timeIntervalSince(pressedAt) < tapThreshold {
+                isLatched = true
+            } else if !isLatched {
+                stopAndInsert()
+            }
         case (.down, .toggle): toggle()
         case (.up, .toggle): break
         case (.commit, _): stopAndInsert()
@@ -269,6 +288,7 @@ public final class DictationController {
     @discardableResult
     private func set(_ new: DictationState) -> Int {
         stateToken += 1
+        if !new.isRecording, isLatched { isLatched = false }
         state = new
         return stateToken
     }

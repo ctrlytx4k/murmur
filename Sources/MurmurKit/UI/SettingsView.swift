@@ -254,8 +254,8 @@ private struct HotkeysPane: View {
                     .frame(width: 240)
             }
             SwitchRow(
-                title: "Double-tap to keep listening",
-                subtitle: "Double-tap the shortcut to record hands-free; tap once more to insert",
+                title: "Tap to keep listening",
+                subtitle: "A quick tap records hands-free; press the shortcut again (or Return) to insert",
                 isOn: bind(settings, \.doubleTapToLock))
         }
 

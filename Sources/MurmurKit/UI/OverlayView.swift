@@ -63,7 +63,7 @@ struct OverlayView: View {
                 .background(Tokens.warningSoft, in: RoundedRectangle(cornerRadius: Tokens.Radius.card, style: .continuous))
                 .padding(EdgeInsets(top: 10, leading: 10, bottom: 4, trailing: 10))
             } else {
-                Text("Listening…")
+                Text(controller.isLatched ? "Listening hands-free… press \(settings.shortcut.keycaps.joined(separator: " ")) again to insert" : "Listening…")
                     .font(.mmTranscript).foregroundStyle(Tokens.labelSecondary)
                     .padding(EdgeInsets(top: 10, leading: 16, bottom: 4, trailing: 16))
             }
@@ -74,7 +74,7 @@ struct OverlayView: View {
                 ElapsedTime(since: since).font(.mmMono).foregroundStyle(Tokens.labelTertiary)
                 HStack(spacing: 4) {
                     hintKey("esc")
-                    if settings.behavior == .toggle { hintKey("↩") }
+                    if settings.behavior == .toggle || controller.isLatched { hintKey("↩") }
                 }
             }
             .padding(EdgeInsets(top: 6, leading: 16, bottom: 12, trailing: 12))
