@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 import Observation
 
 public nonisolated struct InputDevice: Identifiable, Equatable, Sendable {
@@ -6,18 +7,65 @@ public nonisolated struct InputDevice: Identifiable, Equatable, Sendable {
     public var name: String
 }
 
+/// Input devices, read straight from Core Audio so the list matches System Settings > Sound.
 enum AudioDevices {
     static func inputs() -> [InputDevice] {
-        AVCaptureDevice.DiscoverySession(deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified)
-            .devices.map { InputDevice(id: $0.uniqueID, name: $0.localizedName) }
+        deviceIDs().compactMap { id in
+            guard hasInput(id), let uid = string(id, kAudioDevicePropertyDeviceUID), let name = string(id, kAudioObjectPropertyName) else { return nil }
+            // AVAudioEngine makes private aggregate devices for its own use. They are not microphones.
+            if transport(id) == kAudioDeviceTransportTypeAggregate, name.hasPrefix("CADefaultDeviceAggregate") { return nil }
+            return InputDevice(id: uid, name: name)
+        }
     }
 
-    static var systemDefaultName: String? { AVCaptureDevice.default(for: .audio)?.localizedName }
+    static var systemDefaultName: String? {
+        var id = AudioDeviceID(0)
+        guard read(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultInputDevice, &id), id != 0 else { return nil }
+        return string(id, kAudioObjectPropertyName)
+    }
 
     /// The name to show for a stored choice; falls back to the system default when the device is gone.
     static func displayName(for id: String?) -> String {
         if let id, let match = inputs().first(where: { $0.id == id }) { return match.name }
         return systemDefaultName ?? "No microphone"
+    }
+
+    // MARK: Core Audio
+
+    private static func address(_ selector: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+    }
+
+    private static func deviceIDs() -> [AudioDeviceID] {
+        var addr = address(kAudioHardwarePropertyDevices)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size) == noErr else { return [] }
+        var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &ids) == noErr else { return [] }
+        return ids
+    }
+
+    private static func hasInput(_ id: AudioDeviceID) -> Bool {
+        var addr = address(kAudioDevicePropertyStreams, kAudioObjectPropertyScopeInput)
+        var size: UInt32 = 0
+        return AudioObjectGetPropertyDataSize(id, &addr, 0, nil, &size) == noErr && size > 0
+    }
+
+    private static func transport(_ id: AudioDeviceID) -> UInt32 {
+        var value: UInt32 = 0
+        return read(id, kAudioDevicePropertyTransportType, &value) ? value : 0
+    }
+
+    private static func read<T>(_ id: AudioObjectID, _ selector: AudioObjectPropertySelector, _ value: inout T) -> Bool {
+        var addr = address(selector)
+        var size = UInt32(MemoryLayout<T>.size)
+        return withUnsafeMutablePointer(to: &value) { AudioObjectGetPropertyData(id, &addr, 0, nil, &size, $0) } == noErr
+    }
+
+    private static func string(_ id: AudioObjectID, _ selector: AudioObjectPropertySelector) -> String? {
+        var value: Unmanaged<CFString>?
+        guard read(id, selector, &value), let value else { return nil }
+        return value.takeRetainedValue() as String
     }
 }
 
