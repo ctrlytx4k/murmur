@@ -23,9 +23,12 @@ public nonisolated enum DictationMode: String, CaseIterable, Codable, Sendable {
         }
     }
 
+    /// Command mode is not built yet, so it is not offered. The case stays for saved history.
+    public static let offered: [DictationMode] = [.raw, .cleaned]
+
     public var next: DictationMode {
-        let all = Self.allCases
-        return all[(all.firstIndex(of: self)! + 1) % all.count]
+        let all = Self.offered
+        return all[((all.firstIndex(of: self) ?? -1) + 1) % all.count]
     }
 }
 
@@ -196,7 +199,8 @@ public final class SettingsStore {
         historyShortcut = codable("historyShortcut", Shortcut(keyCode: 4, modifiers: [.control, .option]))
         acceptedConflicts = defaults.stringArray(forKey: "acceptedConflicts") ?? []
 
-        mode = raw("mode", .raw)
+        let savedMode: DictationMode = raw("mode", .raw)
+        mode = DictationMode.offered.contains(savedMode) ? savedMode : .raw
         // The built-in engine needs no download, so it is the one that works out of the box.
         modelID = defaults.string(forKey: "modelID") ?? "apple-speech"
         compute = raw("compute", .automatic)

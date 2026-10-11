@@ -38,7 +38,8 @@ Small services behind protocols so each can be tested alone:
 
 ## MVP scope (P0)
 Menu bar item with states, dropdown, recording overlay, push-to-talk and toggle, one local engine, paste insertion, last-transcription copy/re-insert/undo, permissions onboarding, minimal settings (hotkey, mic, launch at login).
-Not in MVP: history, dictionary/snippets, AI cleanup, command mode, per-app rules, Windows. Don't build these until P0 is in real people's hands.
+Also in the first release: AI cleanup (Cleaned up mode) with per-app presets, using Apple's on-device Foundation Models. It must stay optional: when the model is unavailable or a cleanup fails, the spoken text goes in and the UI says so.
+Not in MVP: command mode, automatic updates, Windows. Don't build these until P0 is in real people's hands. A control with nothing behind it is hidden, not shown disabled.
 
 ## Design
 - Source of truth: the mockup HTML in design/ (I will add it). Don't build UI until it's there.

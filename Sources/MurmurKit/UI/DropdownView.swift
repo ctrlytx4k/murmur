@@ -4,11 +4,13 @@ import SwiftUI
 struct DropdownView: View {
     let stores: Stores
     @Environment(\.appActions) private var actions
+    /// Briefly true after Copy, so the button can confirm it worked.
+    @State private var copied = false
 
     private var controller: DictationController { stores.controller }
     private var settings: SettingsStore { stores.settings }
     private var modelName: String { stores.catalog.model(settings.modelID)?.name ?? controller.engineName }
-    private var languageName: String { settings.autoDetectLanguage ? "Auto-detect" : settings.language }
+    private var languageName: String { settings.language }
 
     private var missing: [Permission] { controller.permissions.missing }
     private var blocked: Bool { !controller.permissions.microphone || !controller.permissions.accessibility }
@@ -132,6 +134,13 @@ struct DropdownView: View {
 
     // MARK: engine and microphone
 
+    private var cleanupNote: String? {
+        guard settings.mode == .cleaned else { return nil }
+        if !settings.cleanupEnabled { return "Cleanup is turned off in Settings. Text goes in as spoken." }
+        if case .unavailable(let reason) = controller.cleanupAvailability { return "\(reason). Text goes in as spoken." }
+        return nil
+    }
+
     private var modePicker: some View {
         VStack(spacing: 6) {
             HStack {
@@ -141,7 +150,7 @@ struct DropdownView: View {
             }
             .font(.system(size: 11)).foregroundStyle(Tokens.labelTertiary)
             HStack(spacing: 2) {
-                ForEach(DictationMode.allCases, id: \.self) { mode in
+                ForEach(DictationMode.offered, id: \.self) { mode in
                     let on = settings.mode == mode
                     Button {
                         settings.mode = mode
@@ -161,6 +170,12 @@ struct DropdownView: View {
             }
             .padding(3)
             .background(Tokens.control, in: Pill())
+            if let note = cleanupNote {
+                // Cleaned up mode that cannot clean says so, instead of quietly inserting raw text.
+                Label(note, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11)).foregroundStyle(Tokens.warning)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 6)
+            }
         }
         .padding(EdgeInsets(top: 0, leading: 8, bottom: 10, trailing: 8))
     }
@@ -182,7 +197,6 @@ struct DropdownView: View {
             }
             .buttonStyle(HoverRowStyle())
             Menu {
-                Toggle("Auto-detect", isOn: bind(settings, \.autoDetectLanguage))
                 Picker("Language", selection: bind(settings, \.language)) {
                     ForEach(SettingsStore.languages, id: \.self) { Text($0).tag($0) }
                 }
@@ -268,7 +282,14 @@ struct DropdownView: View {
             .font(.system(size: 11))
             Text(last.text).font(.mmBody).lineSpacing(3).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 6) {
-                smallButton("Copy", symbol: "doc.on.doc") { controller.copyLast() }
+                smallButton(copied ? "Copied" : "Copy", symbol: copied ? "checkmark" : "doc.on.doc", tint: copied ? Tokens.success : nil) {
+                    controller.copyLast()
+                    copied = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.6))
+                        copied = false
+                    }
+                }
                 smallButton("Re-insert", symbol: "arrow.right.to.line") {
                     actions.closeDropdown()
                     controller.reinsertLast()
@@ -282,12 +303,13 @@ struct DropdownView: View {
         .padding(EdgeInsets(top: 0, leading: 2, bottom: 6, trailing: 2))
     }
 
-    private func smallButton(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+    private func smallButton(_ title: String, symbol: String, tint: Color? = nil, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 5) {
+            let label = HStack(spacing: 5) {
                 Image(systemName: symbol).font(.system(size: 10, weight: .semibold))
                 Text(title)
             }
+            if let tint { label.foregroundStyle(tint) } else { label }
         }
         .buttonStyle(MurmurButtonStyle(height: 30, fontSize: 12, fullWidth: true))
     }
@@ -346,7 +368,6 @@ struct DropdownView: View {
 
     private var menuRows: some View {
         VStack(spacing: 0) {
-            menuRow("Check for Updates…") {}.disabled(true).opacity(0.45)
             menuRow("About Murmur") {
                 actions.closeDropdown()
                 actions.showAbout()

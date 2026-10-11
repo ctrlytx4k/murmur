@@ -172,6 +172,11 @@ public final class DictationController {
         if case .error = state { set(.idle) }
     }
 
+    /// Whether Cleaned up mode can do anything right now, with the reason when it can't.
+    public var cleanupAvailability: CleanupAvailability {
+        cleanup?.availability ?? .unavailable("No cleanup model in this build")
+    }
+
     public func refreshPermissions() {
         let fresh = permissionsService.snapshot()
         if fresh != permissions { permissions = fresh }
@@ -222,15 +227,23 @@ public final class DictationController {
         }
         let raw = dictionary.map { TextProcessor.applyDictionary($0.entries, to: heard, app: target?.name) } ?? heard
 
-        // Cleanup is optional and never blocks a take: if it fails, the raw text goes in.
+        // Cleanup is optional and never blocks a take: if it fails, the raw text goes in and is marked Raw.
         var text = raw
-        let mode = settings.mode
-        if mode == .cleaned, settings.cleanupEnabled, let cleanup {
-            let instructions = settings.cleanupPreset == .custom ? settings.customInstructions : settings.cleanupPreset.builtInInstructions
-            text = (try? await cleanup.clean(raw, instructions: instructions)) ?? raw
+        if settings.mode == .cleaned, settings.cleanupEnabled, let cleanup, let instructions = cleanupInstructions(for: target) {
+            if let cleaned = try? await cleanup.clean(raw, instructions: instructions) { text = cleaned }
             guard token == stateToken else { return }
         }
-        await insert(text, token: token, raw: text == raw ? nil : raw, mode: mode, audioSeconds: seconds)
+        await insert(text, token: token, raw: text == raw ? nil : raw, mode: text == raw ? .raw : .cleaned, audioSeconds: seconds)
+    }
+
+    /// The cleanup instructions for a take into this app, or nil when a per-app rule says to leave it raw.
+    private func cleanupInstructions(for app: TargetApp?) -> String? {
+        var preset = settings.cleanupPreset
+        if let rule = settings.appPresets.first(where: { $0.bundleIdentifier == app?.bundleIdentifier }) {
+            guard let chosen = CleanupPreset(rawValue: rule.preset) else { return nil }
+            preset = chosen
+        }
+        return preset == .custom ? settings.customInstructions : preset.builtInInstructions
     }
 
     private func insert(_ text: String, token: Int, raw: String? = nil, mode: DictationMode? = nil, audioSeconds: Double = 0) async {

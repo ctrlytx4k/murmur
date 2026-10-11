@@ -65,7 +65,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             let audio = LiveAudioCapture()
             controller = DictationController(
                 audio: audio, engine: router, insertion: PasteInsertion(settings: settings), permissions: LivePermissionsService(),
-                settings: settings, history: history, dictionary: dictionary)
+                settings: settings, cleanup: AppleCleanup(), history: history, dictionary: dictionary)
             audio.onDeviceChange = { [weak self] message in self?.controller.noteDeviceChange(message) }
             catalog = ModelCatalog(parakeetStatus: router.parakeet.isInstalled ? .installed : .available)
             catalog.onDownload = { [weak self] _ in self?.prepareParakeet(download: true) }

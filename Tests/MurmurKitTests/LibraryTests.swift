@@ -3,15 +3,6 @@ import Testing
 @testable import MurmurKit
 
 @MainActor
-final class FakeCleanup: TextCleanupService {
-    var fails = false
-    func clean(_ text: String, instructions: String) async throws -> String {
-        if fails { throw ServiceUnavailable() }
-        return "Hello there, world."
-    }
-}
-
-@MainActor
 @Suite struct LibraryTests {
     private func defaults() -> UserDefaults { UserDefaults(suiteName: "murmur-tests-\(UUID().uuidString)")! }
 
@@ -66,6 +57,8 @@ final class FakeCleanup: TextCleanupService {
         c.start(); c.stopAndInsert()
         await c.pendingWork?.value
         #expect(c.lastTranscription?.text == "hello there world")
+        // Marked Raw, so the tag never claims a cleanup that did not happen.
+        #expect(c.lastTranscription?.mode == .raw)
     }
 
     @Test func oldHistoryIsPruned() {

@@ -20,15 +20,8 @@ struct VoiceEnginePane: View {
         }
 
         SettingsGroup(title: "Processing") {
-            SettingsRow(title: "Compute", subtitle: "Automatic prefers the Neural Engine and falls back to GPU", showsDivider: false) {
-                PopPicker("Compute", selection: bind(settings, \.compute))
-            }
-            SettingsRow(title: "Language", subtitle: "Auto-detect is slower for short phrases") {
-                Text("Auto-detect").font(.mmCallout).foregroundStyle(Tokens.labelSecondary)
-                Toggle("Auto-detect language", isOn: bind(settings, \.autoDetectLanguage)).toggleStyle(MurmurToggleStyle())
+            SettingsRow(title: "Language", subtitle: "The language you dictate in", showsDivider: false) {
                 PopPicker(label: "Language", options: SettingsStore.languages.map { ($0, $0) }, selection: bind(settings, \.language))
-                    .disabled(settings.autoDetectLanguage)
-                    .opacity(settings.autoDetectLanguage ? 0.45 : 1)
             }
             SettingsRow(title: "Model storage", subtitle: "~/Library/Application Support/Murmur/Models") {
                 Button("Show in Finder") {
@@ -119,11 +112,15 @@ struct CleanupPane: View {
                 title: "Clean up text after transcription",
                 subtitle: "Fixes punctuation and casing, drops filler words. Used by Cleaned up mode.",
                 first: true, isOn: bind(settings, \.cleanupEnabled))
-            SettingsRow(
-                title: stores.isDemo ? "demo-cleanup" : "No cleanup model installed",
-                subtitle: stores.isDemo ? "Simulated · drops filler words only" : "Until one is added, Cleaned up mode inserts the raw transcript"
-            ) {
-                PopLabel(text: "Change Model").opacity(0.45).accessibilityHidden(true)
+            switch stores.controller.cleanupAvailability {
+            case .available(let model):
+                SettingsRow(title: model, subtitle: stores.isDemo ? "Simulated · drops filler words only" : "Built into macOS · runs on this Mac, nothing is sent anywhere") {
+                    Text("Ready").font(.mmSub).fontWeight(.semibold).foregroundStyle(Tokens.success)
+                }
+            case .unavailable(let reason):
+                SettingsRow(title: reason, subtitle: "Until it is available, Cleaned up mode inserts the text as spoken") {
+                    Text("Unavailable").font(.mmSub).fontWeight(.semibold).foregroundStyle(Tokens.warning)
+                }
             }
         }
 
@@ -267,7 +264,6 @@ struct PrivacyPane: View {
                     .buttonStyle(MurmurButtonStyle(kind: .danger, height: 28, fontSize: 12.5))
                     .disabled(stores.history.entries.isEmpty)
             }
-            SwitchRow(title: "Save audio with history", subtitle: "Off: audio is never written to disk", isOn: bind(settings, \.savesAudio))
         }
         .confirmationDialog("Clear all history?", isPresented: $confirmingClear) {
             Button("Clear History", role: .destructive) { stores.history.clear() }
@@ -306,17 +302,7 @@ struct AdvancedPane: View {
         }
 
         SettingsGroup(title: "Audio") {
-            SwitchRow(title: "Trim silence", subtitle: "Skips pauses before transcribing", first: true, isOn: bind(settings, \.trimsSilence))
-            SettingsRow(title: "Silence threshold", subtitle: "Raise it in noisy rooms") {
-                HStack(spacing: 10) {
-                    Text("Low")
-                    ThresholdSlider(value: bind(settings, \.silenceThreshold))
-                    Text("High")
-                }
-                .font(.system(size: 11)).foregroundStyle(Tokens.labelTertiary)
-                .disabled(!settings.trimsSilence).opacity(settings.trimsSilence ? 1 : 0.45)
-            }
-            SettingsRow(title: "Maximum recording length", subtitle: "Recording stops and inserts when reached") {
+            SettingsRow(title: "Maximum recording length", subtitle: "Recording stops and inserts when reached", showsDivider: false) {
                 PopPicker("Maximum recording length", selection: bind(settings, \.maxLength))
             }
         }

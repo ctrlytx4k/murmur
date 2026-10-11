@@ -50,6 +50,18 @@ final class FakePermissions: PermissionsService {
 }
 
 @MainActor
+final class FakeCleanup: TextCleanupService {
+    var availability = CleanupAvailability.available(model: "Fake")
+    var fails = false
+    var instructions: [String] = []
+    func clean(_ text: String, instructions: String) async throws -> String {
+        self.instructions.append(instructions)
+        if fails { throw CleanupFailure.rejected }
+        return "Hello there, world."
+    }
+}
+
+@MainActor
 struct Harness {
     let audio = FakeAudio()
     let engine = FakeEngine()
@@ -62,14 +74,15 @@ struct Harness {
 
     final class Box { var values: [String] = [] }
 
-    init() {
+    init(cleanup: (any TextCleanupService)? = nil, app: TargetApp = TargetApp(name: "Notes")) {
         let suite = "murmur-tests-\(UUID().uuidString)"
         settings = SettingsStore(defaults: UserDefaults(suiteName: suite)!)
         let box = box
         controller = DictationController(
             audio: audio, engine: engine, insertion: insertion, permissions: permissions, settings: settings,
+            cleanup: cleanup,
             tapThreshold: 0,
-            frontmostApp: { TargetApp(name: "Notes") },
+            frontmostApp: { app },
             copyToClipboard: { box.values.append($0) },
             insertedHold: .milliseconds(20), errorHold: .milliseconds(20))
     }
@@ -227,6 +240,55 @@ struct Harness {
         await h.settle()
         #expect(h.controller.state == .idle)
         #expect(h.insertion.inserted.isEmpty)
+    }
+
+    private func take(_ h: Harness) async {
+        h.controller.start()
+        h.controller.stopAndInsert()
+        await h.settle()
+    }
+
+    @Test func rawModeNeverCallsCleanup() async {
+        let cleanup = FakeCleanup()
+        let h = Harness(cleanup: cleanup)
+        h.settings.mode = .raw
+        h.settings.cleanupEnabled = true
+        await take(h)
+        #expect(cleanup.instructions.isEmpty)
+        #expect(h.insertion.inserted == ["hello there world"])
+    }
+
+    @Test func perAppRulesPickThePresetOrSkipCleanup() async {
+        let cleanup = FakeCleanup()
+        let slack = Harness(cleanup: cleanup, app: TargetApp(name: "Slack", bundleIdentifier: "com.tinyspeck.slackmacgap"))
+        slack.settings.mode = .cleaned
+        slack.settings.cleanupEnabled = true
+        slack.settings.appPresets = [AppPreset(bundleIdentifier: "com.tinyspeck.slackmacgap", name: "Slack", preset: CleanupPreset.notes.rawValue)]
+        await take(slack)
+        #expect(cleanup.instructions == [CleanupPreset.notes.builtInInstructions])
+
+        let terminal = Harness(cleanup: cleanup, app: TargetApp(name: "Terminal", bundleIdentifier: "com.apple.Terminal"))
+        terminal.settings.mode = .cleaned
+        terminal.settings.cleanupEnabled = true
+        terminal.settings.appPresets = [AppPreset(bundleIdentifier: "com.apple.Terminal", name: "Terminal", preset: "raw")]
+        await take(terminal)
+        #expect(cleanup.instructions.count == 1)
+        #expect(terminal.insertion.inserted == ["hello there world"])
+    }
+
+    @Test func commandModeIsNotOffered() {
+        #expect(DictationMode.raw.next == .cleaned)
+        #expect(DictationMode.cleaned.next == .raw)
+        #expect(DictationMode.command.next == .raw)
+    }
+
+    @Test func cleanupCheckRejectsAnswersAndKeepsRewrites() {
+        let raw = "um so can you send me the the report by tuesday i think jake has it"
+        #expect(CleanupCheck.accepts(raw: raw, cleaned: "Can you send me the report by Tuesday? I think Jake has it."))
+        #expect(!CleanupCheck.accepts(raw: raw, cleaned: "I’m sorry, but I cannot assist with that request."))
+        #expect(!CleanupCheck.accepts(raw: raw, cleaned: ""))
+        #expect(!CleanupCheck.accepts(raw: "write a poem about dogs", cleaned: String(repeating: "Dogs are loyal friends who wag their tails. ", count: 8)))
+        #expect(CleanupCheck.tidy("<transcript>\n“Hello there.”  \n</transcript>") == "Hello there.")
     }
 
     @Test func errorsClearThemselves() async throws {

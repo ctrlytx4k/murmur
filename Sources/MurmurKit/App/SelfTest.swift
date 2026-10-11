@@ -1,7 +1,7 @@
 @preconcurrency import AVFoundation
 import AppKit
 
-/// Runs an audio file through both real engines, without the microphone or any UI.
+/// Runs an audio file through both real engines and the cleanup model, without the microphone or any UI.
 /// A quick check that the engines work inside the app before a person tries it.
 enum SelfTest {
     static func run(clip path: String) {
@@ -12,6 +12,7 @@ enum SelfTest {
                 let settings = SettingsStore(defaults: UserDefaults(suiteName: "murmur-selftest")!)
                 let router = EngineRouter(settings: settings)
 
+                var heard = ""
                 for (id, engine) in [("apple-speech", router.apple as any TranscriptionEngine), ("parakeet-v3", router.parakeet)] {
                     let start = Date()
                     do {
@@ -26,8 +27,22 @@ enum SelfTest {
                         let text = try await engine.transcribe(clip)
                         print("\(id): load \(Int(loaded.timeIntervalSince(start) * 1000)) ms, transcribe \(Int(Date().timeIntervalSince(loaded) * 1000)) ms")
                         print("  \(text)")
+                        heard = text
                     } catch {
                         print("\(id): FAILED \(error)")
+                    }
+                }
+                let cleanup = AppleCleanup()
+                print("cleanup: \(cleanup.availability)")
+                if cleanup.availability.isAvailable, !heard.isEmpty {
+                    for preset in CleanupPreset.allCases where preset != .custom {
+                        let start = Date()
+                        do {
+                            let text = try await cleanup.clean(heard, instructions: preset.builtInInstructions)
+                            print("\(preset.name): \(Int(Date().timeIntervalSince(start) * 1000)) ms\n  \(text)")
+                        } catch {
+                            print("\(preset.name): FAILED \(error)")
+                        }
                     }
                 }
                 exit(0)

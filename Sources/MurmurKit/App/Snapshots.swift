@@ -29,7 +29,7 @@ enum Snapshots {
             let history = HistoryStore(defaults: defaults)
             let controller = DictationController(
                 audio: DemoAudio(), engine: DemoEngine(), insertion: DemoInsertion(),
-                permissions: DemoPermissions(permissions), settings: settings, errorHold: .seconds(3600))
+                permissions: DemoPermissions(permissions), settings: settings, cleanup: DemoCleanup(), errorHold: .seconds(3600))
             controller.loadPreview(
                 state: state, target: notes, levels: state.isRecording ? (silent ? nil : levels) : nil,
                 isSilent: silent, last: last, canUndo: last != nil, permissions: permissions, deviceNotice: notice)

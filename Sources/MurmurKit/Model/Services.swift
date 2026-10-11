@@ -95,9 +95,52 @@ public protocol TextInsertionService: AnyObject {
     func undo(_ receipt: InsertionReceipt) async -> Bool
 }
 
+public nonisolated enum CleanupAvailability: Equatable, Sendable {
+    case available(model: String)
+    /// With a reason fit to show the user.
+    case unavailable(String)
+
+    public var isAvailable: Bool { if case .available = self { true } else { false } }
+}
+
+public nonisolated enum CleanupFailure: Error { case unavailable, tooLong, rejected }
+
 /// Optional local cleanup of a transcript. Used by Cleaned up mode.
 public protocol TextCleanupService: AnyObject {
+    /// A live read: the model can be switched on or off in System Settings at any time.
+    var availability: CleanupAvailability { get }
     func clean(_ text: String, instructions: String) async throws -> String
+}
+
+/// Guards against a language model that replies to the transcript instead of rewriting it.
+public nonisolated enum CleanupCheck {
+    /// Strips the wrappers a model sometimes adds around its reply.
+    public static func tidy(_ reply: String) -> String {
+        var text = reply.replacingOccurrences(of: "<transcript>", with: "").replacingOccurrences(of: "</transcript>", with: "")
+        text = text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0).replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression) }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.count > 1, let first = text.first, let last = text.last, "\"“".contains(first), "\"”".contains(last) {
+            text = String(text.dropFirst().dropLast())
+        }
+        return text
+    }
+
+    /// A rewrite keeps most of the speaker's own words and stays near the original length.
+    /// An answer, a refusal or an essay does not.
+    public static func accepts(raw: String, cleaned: String) -> Bool {
+        guard !cleaned.isEmpty, cleaned.count <= raw.count * 2 + 80 else { return false }
+        let spoken = Set(words(raw))
+        let written = words(cleaned).filter { $0.count > 3 }
+        guard written.count >= 3 else { return true }
+        let kept = written.filter(spoken.contains).count
+        return Double(kept) / Double(written.count) >= 0.4
+    }
+
+    private static func words(_ text: String) -> [String] {
+        text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+    }
 }
 
 /// Placeholders for the services the spike has not signed off yet. Every call

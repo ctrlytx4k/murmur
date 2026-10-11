@@ -9,7 +9,7 @@ struct OverlayView: View {
 
     private var controller: DictationController { stores.controller }
     private var settings: SettingsStore { stores.settings }
-    private var cleaning: Bool { settings.mode == .cleaned && settings.cleanupEnabled }
+    private var cleaning: Bool { settings.mode == .cleaned && settings.cleanupEnabled && stores.controller.cleanupAvailability.isAvailable }
 
     var body: some View {
         Group {
@@ -197,7 +197,7 @@ struct OverlayView: View {
     private var modeMenu: some View {
         Menu {
             Picker("Mode", selection: bind(settings, \.mode)) {
-                ForEach(DictationMode.allCases, id: \.self) { Text($0.label).tag($0) }
+                ForEach(DictationMode.offered, id: \.self) { Text($0.label).tag($0) }
             }
             .pickerStyle(.inline).labelsHidden()
         } label: {

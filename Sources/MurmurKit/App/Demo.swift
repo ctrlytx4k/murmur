@@ -63,6 +63,7 @@ final class DemoPermissions: PermissionsService {
 
 /// Drops filler words and tidies casing, so Cleaned up mode has something to show in the demo.
 final class DemoCleanup: TextCleanupService {
+    let availability = CleanupAvailability.available(model: "demo-cleanup")
     func clean(_ text: String, instructions: String) async throws -> String {
         try await Task.sleep(for: .milliseconds(400))
         let fillers: Set<String> = ["um", "uh", "so", "like"]
