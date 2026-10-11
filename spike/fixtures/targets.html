@@ -1,0 +1,12 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Insertion targets</title>
+<style>
+  body { font: 15px -apple-system, sans-serif; max-width: 720px; margin: 24px auto; }
+  textarea, [contenteditable], input { display: block; width: 100%; box-sizing: border-box; margin: 6px 0 22px; padding: 8px; font: inherit; border: 1px solid #999; border-radius: 6px; }
+  textarea, [contenteditable] { min-height: 150px; white-space: pre-wrap; }
+</style>
+<label>textarea<textarea id="ta"></textarea></label>
+<label>contenteditable</label><div id="ce" contenteditable="true"></div>
+<label>password field (do not type a real password here)<input id="pw" type="password" autocomplete="off"></label>
+<label>plain text input<input id="in" type="text"></label>

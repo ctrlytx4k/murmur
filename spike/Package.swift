@@ -8,6 +8,7 @@ let package = Package(
     targets: [
         .target(name: "SpikeSupport"),
         .executableTarget(name: "hotkey", dependencies: ["SpikeSupport"]),
+        .executableTarget(name: "insert", dependencies: ["SpikeSupport"]),
     ],
     swiftLanguageModes: [.v5]
 )
