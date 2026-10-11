@@ -2,6 +2,7 @@
 //
 //   hotkey --scenario hold30 [--key 61] [--tap listen|active] [--duration 60]
 //          [--synth 200 --synth-interval-ms 15]
+//   hotkey --detect      print the key code of the next key pressed, then exit
 //
 // Ctrl-C (or --duration) ends the run and writes a summary row.
 
@@ -136,6 +137,16 @@ func keyEvent(down: Bool, _ e: RawEvent) {
 
 func handle(_ e: RawEvent) {
     rawEvents += 1
+    // --detect: report the first key pressed and quit, so the runner can use whatever key this keyboard has.
+    if args.flag("detect") {
+        let type = CGEventType(rawValue: e.type)
+        let modifierDown = type == .flagsChanged && (modifierMasks[e.keyCode].map { e.flags & $0 != 0 } ?? false)
+        if modifierDown || (type == .keyDown && !e.autorepeat && e.keyCode != 36) {
+            print("DETECTED \(e.keyCode)")
+            exit(0)
+        }
+        return
+    }
     switch CGEventType(rawValue: e.type) {
     case .tapDisabledByTimeout, .tapDisabledByUserInput:
         let timeout = e.type == CGEventType.tapDisabledByTimeout.rawValue

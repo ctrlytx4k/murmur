@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Walks through every spike run that needs a person, one step at a time.
 # Run it from Terminal.app (not an editor's terminal), so permissions belong to Terminal:
 #
@@ -16,15 +16,36 @@ bin=.build/release
 
 have() { ls results/"$1"-*.jsonl >/dev/null 2>&1; }
 
+# Throw away anything typed ahead, so a stray Return cannot start the next step unattended.
+ask() {
+  while read -r -t 1 _; do :; done
+  printf '%s' "$1"
+  read -r answer
+}
+
+# After a hotkey run: say what was seen, and discard a run where the key never registered.
+check_hotkey() {
+  file="$(ls -t results/"$1"-*.jsonl 2>/dev/null | head -1)"
+  [ -n "$file" ] || return
+  presses="$(grep '"event":"summary"' "$file" | sed -E 's/.*"downs":([0-9]+).*/\1/')"
+  if [ "${presses:-0}" = 0 ]; then
+    rm -f "$file"
+    echo "!! No presses of your key were seen, so this run was thrown away. Run the script again to redo it."
+  else
+    echo "   saw $presses presses"
+  fi
+}
+
 # step <result-prefix> <instructions> <command...>
 step() {
   prefix="$1"; text="$2"; shift 2
   if have "$prefix"; then echo "✓ $prefix (already recorded)"; return; fi
-  printf '\n────────────────────────────────────────\n%s\n\nReturn to start, s to skip: ' "$text"
-  read -r answer
+  ask "$(printf '\n────────────────────────────────────────\n%s\n\nReturn to start, s to skip: ' "$text")"
   [ "$answer" = "s" ] && { echo "skipped"; return; }
+  echo "   running now..."
   "$@" 2>/dev/null
   echo "done: $prefix"
+  case "$prefix" in hotkey-*) check_hotkey "$prefix" ;; esac
 }
 
 perms="$("$bin/hotkey" --scenario preflight --duration 1 --out "${TMPDIR:-/tmp}" 2>&1 | grep '"event":"permissions"')"
@@ -42,28 +63,33 @@ EOF
 fi
 
 if [ "$only" = all ] || [ "$only" = hotkey ]; then
-  echo; echo "== 1. Hotkey. The key is RIGHT OPTION. Each run stops on its own. =="
-  step hotkey-hold30 "Hold right Option for 30 seconds, then release. (40 s run)" \
-    "$bin/hotkey" --scenario hold30 --duration 40
-  step hotkey-taps200 "Tap right Option 200 times as fast as you can. (60 s run)" \
-    "$bin/hotkey" --scenario taps200 --duration 60
+  echo; echo "== 1. Hotkey. Each run stops on its own. =="
+  echo "Pick the key for every hotkey step. The intended one is the Option (Alt) key to the RIGHT of the space bar."
+  ask "Press Return, then press and release that key once: "
+  key="$("$bin/hotkey" --detect --duration 20 --out "${TMPDIR:-/tmp}" 2>/dev/null | sed -n 's/^DETECTED //p')"
+  if [ -z "$key" ]; then echo "No key press was seen in 20 s. Run the script again."; exit 1; fi
+  echo "Using key code $key (61 is the right Option key). 'Your key' below means this key."
+  step hotkey-hold30 "Hold your key for 30 seconds, then release. (40 s run)" \
+    "$bin/hotkey" --key "$key" --scenario hold30 --duration 40
+  step hotkey-taps200 "Tap your key 200 times as fast as you can. (60 s run)" \
+    "$bin/hotkey" --key "$key" --scenario taps200 --duration 60
   step hotkey-sleepwake "Tap 5 times, then Apple menu > Sleep. Wait 20 s, wake the Mac, tap 5 more times. (120 s run)" \
-    "$bin/hotkey" --scenario sleepwake --duration 120
+    "$bin/hotkey" --key "$key" --scenario sleepwake --duration 120
   open fixtures/targets.html 2>/dev/null
-  step hotkey-password "In the browser page that just opened, click the PASSWORD field. Tap right Option 10 times, then hold it 3 s. (30 s run)" \
-    "$bin/hotkey" --scenario password --duration 30
+  step hotkey-password "In the browser page that just opened, click the PASSWORD field. Tap your key 10 times, then hold it 3 s. (30 s run)" \
+    "$bin/hotkey" --key "$key" --scenario password --duration 30
   step hotkey-secure-terminal "Terminal menu > Secure Keyboard Entry: turn it ON. Tap 10 times here, click another app, tap 10 more. (40 s run) Turn it OFF afterwards." \
-    "$bin/hotkey" --scenario secure-terminal --duration 40
-  step hotkey-contested "Only if another tool (Karabiner, Raycast, another dictation app) can bind right Option: bind it there, then tap 10 times. Otherwise skip. (30 s run)" \
-    "$bin/hotkey" --scenario contested --duration 30
-  step hotkey-taps-active "Active (key-swallowing) tap. Tap right Option 20 times. (30 s run)" \
-    "$bin/hotkey" --scenario taps-active --tap active --duration 30
+    "$bin/hotkey" --key "$key" --scenario secure-terminal --duration 40
+  step hotkey-contested "Only if another tool (Karabiner, Raycast, another dictation app) can bind your key: bind it there, then tap 10 times. Otherwise skip. (30 s run)" \
+    "$bin/hotkey" --key "$key" --scenario contested --duration 30
+  step hotkey-taps-active "Active (key-swallowing) tap. Tap your key 20 times. (30 s run)" \
+    "$bin/hotkey" --key "$key" --scenario taps-active --tap active --duration 30
 
   scripts/make-app.sh hotkey >/dev/null 2>&1
   step hotkey-app-first "Same test as a standalone app. macOS should ask for Input Monitoring for 'Spike-hotkey': approve it in System Settings. Tap a few times. (20 s run)" \
-    open -W build/Spike-hotkey.app --args --out "$PWD/results" --scenario app-first --duration 20
-  step hotkey-app-granted "The app again, now with permission. Tap right Option 20 times and hold once for 5 s. (40 s run)" \
-    open -W build/Spike-hotkey.app --args --out "$PWD/results" --scenario app-granted --duration 40
+    open -W build/Spike-hotkey.app --args --out "$PWD/results" --key "$key" --scenario app-first --duration 20
+  step hotkey-app-granted "The app again, now with permission. Tap your key 20 times and hold once for 5 s. (40 s run)" \
+    open -W build/Spike-hotkey.app --args --out "$PWD/results" --key "$key" --scenario app-granted --duration 40
 fi
 
 if [ "$only" = all ] || [ "$only" = insert ]; then
@@ -84,8 +110,7 @@ if [ "$only" = all ] || [ "$only" = insert ]; then
       *) hint="Use a new note in Notes." ;;
     esac
     if have "insert-$target"; then echo "✓ insert-$target (already recorded)"; continue; fi
-    printf '\n────────────────────────────────────────\nTarget: %s\n%s\n\nReturn to start the countdown, s to skip: ' "$target" "$hint"
-    read -r answer
+    ask "$(printf '\n────────────────────────────────────────\nTarget: %s\n%s\n\nReturn to start the countdown, s to skip: ' "$target" "$hint")"
     [ "$answer" = "s" ] && continue
     "$bin/insert" target --name "$target" 2>&1 | grep -v '^{'
   done
@@ -97,8 +122,7 @@ if [ "$only" = all ] || [ "$only" = voice ]; then
   for spec in "5s 7" "30s 40" "2min 135" "technical 50"; do
     set -- $spec
     if [ -f "audio/real-$1.wav" ]; then echo "✓ real-$1 (already recorded)"; continue; fi
-    printf '\n────────────────────────────────────────\nClip: %s (%s s)\nReturn to see the text and start, s to skip: ' "$1" "$2"
-    read -r answer
+    ask "$(printf '\n────────────────────────────────────────\nClip: %s (%s s)\nReturn to see the text and start, s to skip: ' "$1" "$2")"
     [ "$answer" = "s" ] && continue
     "$bin/transcribe" record --name "real-$1" --seconds "$2" --ref "fixtures/references/$1.txt" 2>&1 | grep -v '^{'
   done
