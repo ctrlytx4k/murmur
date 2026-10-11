@@ -210,12 +210,13 @@ final class StatusItemController: NSObject {
         close()
     }
 
-    /// Under the icon, right-aligned, kept on screen.
+    /// Centered under the icon. Near the screen edge it slides in to stay on screen,
+    /// which gives the right-aligned placement the mockup shows.
     private func place(_ size: CGSize) {
         guard size.width > 0, let buttonWindow = item.button?.window, let screen = buttonWindow.screen ?? NSScreen.main else { return }
         let anchor = buttonWindow.frame
         let margin = FloatingPanel.margin
-        var x = anchor.maxX - size.width + margin
+        var x = anchor.midX - size.width / 2
         x = min(x, screen.visibleFrame.maxX - size.width + margin - 8)
         x = max(x, screen.visibleFrame.minX - margin + 8)
         let y = anchor.minY - 6 - size.height + margin
