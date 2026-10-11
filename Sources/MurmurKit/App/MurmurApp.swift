@@ -79,6 +79,10 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         stores = Stores(
             controller: controller, settings: settings, dictionary: dictionary, history: history,
             network: NetworkLog(defaults: defaults), catalog: catalog, isDemo: demo)
+        router?.apple.onAssetDownload = { [weak self] in
+            guard let self, self.settings.logsNetworkActivity else { return }
+            self.stores.network.record(host: "Apple (via macOS)", reason: "Speech language download", bytes: 0)
+        }
         if demo {
             DemoData.seed(stores)
             settings.cleanupEnabled = true

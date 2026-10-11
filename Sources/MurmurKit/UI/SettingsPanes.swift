@@ -231,8 +231,8 @@ struct PrivacyPane: View {
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Tokens.stroke, lineWidth: 0.5))
 
         SettingsGroup(title: "Network") {
-            SwitchRow(title: "Offline mode", subtitle: "Blocks every request, including update checks and model downloads", first: true, isOn: bind(settings, \.offlineMode))
-            SwitchRow(title: "Log network activity", subtitle: "Keeps a local record of every request Murmur makes", isOn: bind(settings, \.logsNetworkActivity))
+            SwitchRow(title: "Offline mode", subtitle: "Blocks model and language downloads. Dictation itself never uses the network.", first: true, isOn: bind(settings, \.offlineMode))
+            SwitchRow(title: "Log network activity", subtitle: "Keeps a local record of every download Murmur starts", isOn: bind(settings, \.logsNetworkActivity))
             logRow(["When", "Host", "Why", "Size"]).font(.system(size: 10.5, weight: .semibold)).textCase(.uppercase).foregroundStyle(Tokens.labelTertiary)
                 .frame(height: 26).background(Tokens.control)
                 .overlay(alignment: .top) { Rectangle().fill(Tokens.separator).frame(height: 1) }

@@ -67,6 +67,11 @@ public final class ParakeetEngine: TranscriptionEngine {
     }
 }
 
+nonisolated struct OfflineModeBlocked: LocalizedError {
+    static let message = "This language needs a one-time download, and offline mode is on (Settings › Privacy)"
+    var errorDescription: String? { Self.message }
+}
+
 /// Apple's on-device SpeechAnalyzer. Nothing to bundle; macOS fetches its language assets itself.
 public final class AppleSpeechEngine: TranscriptionEngine {
     public let displayName = "apple-speechanalyzer"
@@ -74,6 +79,10 @@ public final class AppleSpeechEngine: TranscriptionEngine {
     public private(set) var progress: Double?
     public private(set) var lastError: String?
     private var preparedLocale: String?
+    /// True while offline mode is on: language assets are then never fetched.
+    public var isOffline: @MainActor () -> Bool = { false }
+    /// Called when macOS is asked to download language assets, so the request can be logged.
+    public var onAssetDownload: (@MainActor () -> Void)?
 
     public init(locale: @escaping @MainActor () -> Locale) {
         self.locale = locale
@@ -95,12 +104,18 @@ public final class AppleSpeechEngine: TranscriptionEngine {
         lastError = nil
         do {
             if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+                guard !isOffline() else { throw OfflineModeBlocked() }
+                onAssetDownload?()
                 progress = 0.5
                 defer { progress = nil }
                 try await request.downloadAndInstall()
             }
             preparedLocale = locale.identifier
         } catch {
+            if error is OfflineModeBlocked {
+                lastError = OfflineModeBlocked.message
+                throw error
+            }
             lastError = "Apple’s speech engine isn’t available for \(locale.localizedString(forIdentifier: locale.identifier) ?? locale.identifier): \(error.localizedDescription)"
             throw error
         }
@@ -163,6 +178,7 @@ public final class EngineRouter: TranscriptionEngine {
         self.settings = settings
         parakeet = ParakeetEngine()
         apple = AppleSpeechEngine { Locale(identifier: EngineRouter.localeIdentifier(for: settings.language)) }
+        apple.isOffline = { settings.offlineMode }
     }
 
     private var current: any TranscriptionEngine { settings.modelID == "parakeet-v3" ? parakeet : apple }
