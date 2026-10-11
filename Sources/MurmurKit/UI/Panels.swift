@@ -34,6 +34,8 @@ final class FloatingPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
     }
 
+    private var onResize: ((CGSize) -> Void)?
+
     func setContent(_ view: some View, onResize: @escaping (CGSize) -> Void) {
         let root = view
             .shadow(color: .black.opacity(0.16), radius: 18, y: 10)
@@ -41,12 +43,22 @@ final class FloatingPanel: NSPanel {
             .fixedSize()
             .onGeometryChange(for: CGSize.self) { $0.size } action: { onResize($0) }
         contentView = NSHostingView(rootView: root)
+        self.onResize = onResize
+        sizeToContent()
+    }
+
+    /// The panel starts at zero size, and a zero-size window never lays out its content,
+    /// so the size has to be asked for rather than waited on.
+    func sizeToContent() {
+        guard let size = contentView?.fittingSize, size.width > 0 else { return }
+        onResize?(size)
     }
 
     static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
     func fadeIn() {
         guard !isVisible || alphaValue < 1 else { return }
+        sizeToContent()
         if !isVisible { alphaValue = Self.reduceMotion ? 1 : 0 }
         if allowsKey { makeKeyAndOrderFront(nil) } else { orderFrontRegardless() }
         NSAnimationContext.runAnimationGroup { context in
