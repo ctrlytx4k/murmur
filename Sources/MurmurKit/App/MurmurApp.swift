@@ -23,6 +23,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
     private var permissionPoll: Timer?
+    private var isPreparingLanguage = false
 
     public init(arguments: [String] = CommandLine.arguments) {
         self.arguments = arguments
@@ -69,6 +70,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             audio.onDeviceChange = { [weak self] message in self?.controller.noteDeviceChange(message) }
             catalog = ModelCatalog(parakeetStatus: router.parakeet.isInstalled ? .installed : .available)
             catalog.onDownload = { [weak self] _ in self?.prepareParakeet(download: true) }
+            catalog.onPrepareLanguage = { [weak self] in self?.prepareLanguage() }
             self.router = router
 
             let hotkeys = LiveHotkeyService()
@@ -183,7 +185,34 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             if router.parakeet.isInstalled, !router.parakeet.isLoaded { prepareParakeet(download: false) }
         } else {
             _ = settings.language
-            Task { try? await router.apple.prepare() }
+            prepareLanguage()
+        }
+    }
+
+    /// Gets the built-in engine's language files ready ahead of the first take, and keeps the catalog
+    /// telling the truth about it for onboarding.
+    private func prepareLanguage() {
+        guard let router, !isPreparingLanguage else { return }
+        let catalog = stores.catalog
+        guard !router.apple.isPrepared else { return catalog.languageStatus = .ready }
+        isPreparingLanguage = true
+        catalog.languageStatus = .preparing
+        Task {
+            do {
+                try await router.apple.prepare()
+                self.isPreparingLanguage = false
+                // The language may have been changed while the last one was being fetched.
+                if router.apple.isPrepared {
+                    DebugLog.log("built-in speech language ready")
+                    catalog.languageStatus = .ready
+                } else {
+                    self.prepareLanguage()
+                }
+            } catch {
+                self.isPreparingLanguage = false
+                DebugLog.log("built-in speech language failed: \(error.localizedDescription)")
+                catalog.languageStatus = .failed(router.apple.lastError ?? error.localizedDescription)
+            }
         }
     }
 
@@ -193,6 +222,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         let catalog = stores.catalog
         if download {
             guard !settings.offlineMode else { return catalog.setStatus(.unavailable("Offline mode is on (Settings › Privacy)"), for: "parakeet-v3") }
+            catalog.downloadError = nil
             catalog.setStatus(.downloading(0), for: "parakeet-v3")
         }
         Task {
@@ -208,6 +238,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
                     self.settings.modelID = "parakeet-v3"
                 }
             } catch {
+                if download { catalog.downloadError = "The download stopped: \(error.localizedDescription) Check your connection and try again." }
                 catalog.setStatus(router.parakeet.isInstalled ? .installed : .available, for: "parakeet-v3")
             }
         }
@@ -259,7 +290,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
 
     private func showOnboarding(at step: OnboardingStep) {
         onboardingWindow?.close()
-        let view = OnboardingView(controller: controller, settings: settings, step: step) { [weak self] in
+        let view = OnboardingView(stores: stores, step: step) { [weak self] in
             self?.onboardingWindow?.close()
         }
         let window = makeWindow(view, title: "Welcome to Murmur")

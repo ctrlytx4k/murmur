@@ -88,8 +88,11 @@ public final class AppleSpeechEngine: TranscriptionEngine {
         self.locale = locale
     }
 
+    /// True once the language files for the chosen language are known to be installed.
+    public var isPrepared: Bool { preparedLocale == locale().identifier }
+
     public var readiness: EngineReadiness {
-        if preparedLocale == locale().identifier { return .ready }
+        if isPrepared { return .ready }
         if let progress { return .preparing(name: displayName, progress: progress) }
         // Not fatal: transcribe() prepares on demand. Reported only when a previous attempt failed.
         if let lastError { return .unavailable(lastError) }

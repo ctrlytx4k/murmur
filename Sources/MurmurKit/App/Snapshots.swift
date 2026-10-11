@@ -94,13 +94,17 @@ enum Snapshots {
         add("dialog-update-available", UpdateAvailableView(
             version: "1.1", currentVersion: "1.0.0", size: "18 MB", notes: "[Release notes for 1.1 appear here]", installsAutomatically: .constant(true)))
 
-        let (c, s) = (st.controller, st.settings)
-        add("onboarding-1-welcome", OnboardingView(controller: c, settings: s, step: .welcome))
-        add("onboarding-2-microphone-granted", OnboardingView(controller: c, settings: s, step: .microphone))
-        add("onboarding-4-input-monitoring-granted", OnboardingView(controller: c, settings: s, step: .inputMonitoring))
-        add("onboarding-5-try-it", OnboardingView(controller: c, settings: s, step: .tryIt))
+        add("onboarding-1-welcome", OnboardingView(stores: st, step: .welcome))
+        add("onboarding-2-microphone-granted", OnboardingView(stores: st, step: .microphone))
+        add("onboarding-4-input-monitoring-granted", OnboardingView(stores: st, step: .inputMonitoring))
+        add("onboarding-5-speech-model", OnboardingView(stores: st, step: .model))
+        add("onboarding-6-try-it", OnboardingView(stores: st, step: .tryIt))
         st = make(.idle, permissions: noAX)
-        add("onboarding-3-accessibility-waiting", OnboardingView(controller: st.controller, settings: st.settings, step: .accessibility))
+        add("onboarding-3-accessibility-waiting", OnboardingView(stores: st, step: .accessibility))
+        st = make(.idle)
+        st.catalog.setStatus(.downloading(0.62), for: "parakeet-v3")
+        st.catalog.languageStatus = .preparing
+        add("onboarding-5-speech-model-preparing", OnboardingView(stores: st, step: .model))
 
         for (name, view) in shots {
             for (suffix, appearance, backdrop) in [

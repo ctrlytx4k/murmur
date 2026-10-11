@@ -151,7 +151,13 @@ public nonisolated struct SpeechModel: Identifiable, Equatable, Sendable {
 /// The engines named in the project's stack, in the layout the mockup uses for its model list.
 @Observable
 public final class ModelCatalog {
+    /// Where the built-in engine's language files stand. macOS fetches them once per language.
+    public enum LanguageStatus: Equatable, Sendable { case preparing, ready, failed(String) }
+
     public private(set) var models: [SpeechModel]
+    public var languageStatus = LanguageStatus.ready
+    /// Why the last model download stopped, until another one starts.
+    public var downloadError: String?
     @ObservationIgnored private var timer: Timer?
 
     public init(parakeetStatus: SpeechModel.Status = .unavailable("Arrives with the transcription engine")) {
@@ -167,7 +173,11 @@ public final class ModelCatalog {
     @ObservationIgnored public var onDownload: ((String) -> Void)?
     public var downloadsAreReal: Bool { onDownload != nil }
 
+    /// Set by the app: tries again to get the built-in engine's language files.
+    @ObservationIgnored public var onPrepareLanguage: (() -> Void)?
+
     public func requestDownload(_ id: String) {
+        downloadError = nil
         if let onDownload { onDownload(id) } else { simulateDownload(id) }
     }
 

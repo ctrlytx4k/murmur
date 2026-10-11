@@ -15,6 +15,9 @@ struct VoiceEnginePane: View {
                     modelRow(model, first: index == 0)
                 }
             }
+            if let error = stores.catalog.downloadError {
+                Text(error).font(.mmSub).foregroundStyle(Tokens.warning).padding(.horizontal, 4).fixedSize(horizontal: false, vertical: true)
+            }
             Text("Speed and accuracy are relative to each other on this Mac.")
                 .font(.mmSub).foregroundStyle(Tokens.labelTertiary).padding(.horizontal, 4)
         }

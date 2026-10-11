@@ -1,7 +1,11 @@
 import SwiftUI
 
 enum OnboardingStep: Int, CaseIterable {
-    case welcome, microphone, accessibility, inputMonitoring, tryIt
+    case welcome, microphone, accessibility, inputMonitoring, model, tryIt
+
+    /// The steps that count toward "Step 2 of 5". Try it is the finish line, not a step.
+    static let numbered = allCases.filter { $0 != .tryIt }
+    var number: Int { min(rawValue + 1, Self.numbered.count) }
 
     var permission: Permission? {
         switch self {
@@ -21,10 +25,12 @@ enum OnboardingStep: Int, CaseIterable {
     }
 }
 
-/// First launch: the privacy promise, three permissions checked live, then a practice field. 620 x 540.
+/// First launch: the privacy promise, three permissions checked live, the speech model, then a practice field. 620 x 540.
 struct OnboardingView: View {
-    let controller: DictationController
-    let settings: SettingsStore
+    let stores: Stores
+    private var controller: DictationController { stores.controller }
+    private var settings: SettingsStore { stores.settings }
+    private var catalog: ModelCatalog { stores.catalog }
     @State var step: OnboardingStep = .welcome
     var onFinish: () -> Void = {}
 
@@ -35,6 +41,10 @@ struct OnboardingView: View {
     private let poll = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var granted: Bool { step.permission.map(controller.permissions.isGranted) ?? true }
+    /// The built-in engine is chosen and macOS is still fetching its language files.
+    private var isPreparingLanguage: Bool { settings.modelID == "apple-speech" && catalog.languageStatus == .preparing }
+    /// Continue waits for a missing permission, and for the speech model so the first take does not stall.
+    private var canContinue: Bool { step == .model ? !isPreparingLanguage : granted }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,6 +52,7 @@ struct OnboardingView: View {
             Group {
                 switch step {
                 case .welcome: welcome
+                case .model: modelStep
                 case .tryIt: tryIt
                 default: permissionStep(step.permission!)
                 }
@@ -122,22 +133,24 @@ struct OnboardingView: View {
     private func copy(for permission: Permission) -> Copy {
         switch permission {
         case .microphone:
-            Copy(symbol: "mic", step: "Step 2 of 4 · Microphone", title: "Let Murmur hear you",
+            Copy(symbol: "mic", step: stepLabel("Microphone"), title: "Let Murmur hear you",
                  why: "Murmur listens only while you hold or toggle your shortcut. The microphone indicator in your menu bar shows whenever it is on.",
                  never: "Never: background listening, wake words, or saving audio.",
                  okTitle: "Microphone access granted", okSub: "Say something; the meter should move.", path: "Microphone")
         case .accessibility:
-            Copy(symbol: "accessibility", step: "Step 3 of 4 · Accessibility", title: "Let Murmur type for you",
+            Copy(symbol: "accessibility", step: stepLabel("Accessibility"), title: "Let Murmur type for you",
                  why: "Accessibility lets Murmur place text at your cursor in any app, the same way a keyboard would.",
                  never: "Never: reading other windows, clicking for you, or typing into password fields.",
                  okTitle: "Accessibility granted", okSub: "Murmur can type into the app you’re using.", path: "Accessibility")
         case .inputMonitoring:
-            Copy(symbol: "keyboard", step: "Step 4 of 4 · Input Monitoring", title: "Let your shortcut work everywhere",
+            Copy(symbol: "keyboard", step: stepLabel("Input Monitoring"), title: "Let your shortcut work everywhere",
                  why: "Input Monitoring lets Murmur notice your dictation shortcut even when another app is in front.",
                  never: "Never: logging keystrokes. Murmur only watches for the one shortcut you set.",
                  okTitle: "Input Monitoring granted", okSub: "Your shortcut is \(settings.shortcut.spokenName). Change it any time in Settings.", path: "Input Monitoring")
         }
     }
+
+    private func stepLabel(_ name: String) -> String { "Step \(step.number) of \(OnboardingStep.numbered.count) · \(name)" }
 
     private func permissionStep(_ permission: Permission) -> some View {
         let c = copy(for: permission)
@@ -210,6 +223,93 @@ struct OnboardingView: View {
         .accessibilityLabel("Input level")
     }
 
+    // MARK: speech model
+
+    private var modelStep: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Image(systemName: "waveform").font(.system(size: 22)).foregroundStyle(Tokens.accentText)
+                .frame(width: 54, height: 54).chipSurface(cornerRadius: 16)
+            Text(stepLabel("Speech model")).font(.system(size: 12, weight: .semibold)).foregroundStyle(Tokens.labelTertiary)
+            Text("Pick what turns speech into text").font(.system(size: 24, weight: .bold)).kerning(-0.2)
+            Text("Both run entirely on this Mac. The built-in one works right away. You can switch any time in Settings.")
+                .font(.system(size: 13.5)).lineSpacing(4).foregroundStyle(Tokens.labelSecondary).fixedSize(horizontal: false, vertical: true)
+
+            VStack(spacing: 0) {
+                ForEach(Array(catalog.models.reversed().enumerated()), id: \.element.id) { index, model in
+                    modelRow(model).overlay(alignment: .top) { if index > 0 { Rectangle().fill(Tokens.separator).frame(height: 1) } }
+                }
+            }
+            .background(Tokens.elevated, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Tokens.stroke, lineWidth: 0.5))
+            .padding(.top, 6)
+
+            if let error = catalog.downloadError {
+                Text(error).font(.mmSub).foregroundStyle(Tokens.warning).fixedSize(horizontal: false, vertical: true)
+            } else if case .downloading = catalog.model("parakeet-v3")?.status {
+                Text("No need to wait here. Murmur switches to parakeet-v3 when the download finishes.")
+                    .font(.mmSub).foregroundStyle(Tokens.labelTertiary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.top, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func modelRow(_ model: SpeechModel) -> some View {
+        let active = settings.modelID == model.id && model.isUsable
+        let builtIn = model.status == .builtIn
+        return HStack(spacing: 12) {
+            Circle()
+                .fill(active ? Tokens.accent : Tokens.elevated)
+                .overlay(Circle().strokeBorder(active ? .clear : Tokens.stroke, lineWidth: 1.5))
+                .overlay { if active { Circle().fill(Tokens.onAccent).frame(width: 6, height: 6) } }
+                .frame(width: 18, height: 18)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(model.name).font(.system(size: 12.5, weight: .semibold, design: .monospaced))
+                Text(builtIn ? languageLine : model.detail)
+                    .font(.mmSub).foregroundStyle(builtIn && languageFailed ? Tokens.warning : Tokens.labelTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            switch model.status {
+            case .builtIn where catalog.languageStatus == .preparing:
+                Spinner(size: 16)
+            case .builtIn where languageFailed:
+                Button("Try Again") { catalog.onPrepareLanguage?() }.buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5))
+            case .builtIn, .installed:
+                if active {
+                    Text("In use").font(.system(size: 12, weight: .semibold)).foregroundStyle(Tokens.accentText)
+                } else {
+                    Button("Use") { settings.modelID = model.id }.buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5))
+                }
+            case .available:
+                Button { catalog.requestDownload(model.id) } label: { Label("Download", systemImage: "arrow.down.to.line") }
+                    .buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5))
+            case .downloading(let progress):
+                VStack(alignment: .leading, spacing: 4) {
+                    ProgressBar(value: progress, height: 5)
+                    Text("\(Int(progress * 100))%").font(.system(size: 10.5)).monospacedDigit().foregroundStyle(Tokens.labelTertiary)
+                }
+                .frame(width: 110)
+            case .unavailable(let why):
+                Text(why).font(.system(size: 11)).foregroundStyle(Tokens.labelTertiary).multilineTextAlignment(.trailing).frame(maxWidth: 150, alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 64)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var languageFailed: Bool { if case .failed = catalog.languageStatus { true } else { false } }
+
+    private var languageLine: String {
+        switch catalog.languageStatus {
+        case .ready: "Built into macOS · \(settings.language) is ready"
+        case .preparing: "Getting \(settings.language) ready. macOS downloads it once."
+        case .failed(let why): why
+        }
+    }
+
     // MARK: try it
 
     private var tryIt: some View {
@@ -264,15 +364,15 @@ struct OnboardingView: View {
     private var footer: some View {
         HStack(spacing: 10) {
             HStack(spacing: 6) {
-                let current = min(max(step.rawValue + 1, 1), 4)
-                ForEach(1...4, id: \.self) { i in
+                let current = step.number
+                ForEach(1...OnboardingStep.numbered.count, id: \.self) { i in
                     Pill().fill(i <= current ? Tokens.accent : Tokens.controlStrong).frame(width: i == current ? 20 : 6, height: 6)
                 }
             }
             .accessibilityElement()
-            .accessibilityLabel(step == .tryIt ? "All steps complete" : "Step \(step.rawValue + 1) of 4")
+            .accessibilityLabel(step == .tryIt ? "All steps complete" : "Step \(step.number) of \(OnboardingStep.numbered.count)")
             Spacer()
-            if step.permission != nil, !granted {
+            if !canContinue {
                 Button("Skip for now") { advance() }.buttonStyle(LinkButtonStyle(color: Tokens.labelSecondary)).padding(.horizontal, 10)
             }
             if step != .welcome {
@@ -281,7 +381,7 @@ struct OnboardingView: View {
             }
             Button(step == .welcome ? "Get Started" : (step == .tryIt ? "Done" : "Continue")) { advance() }
                 .buttonStyle(MurmurButtonStyle(kind: .primary, height: 32))
-                .disabled(!granted)
+                .disabled(!canContinue)
                 .keyboardShortcut(.defaultAction)
         }
         .padding(EdgeInsets(top: 0, leading: 28, bottom: 0, trailing: 22))
