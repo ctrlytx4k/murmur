@@ -301,6 +301,9 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
     private func present(_ window: NSWindow?) {
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
+        // When System Settings relaunches us ("Quit & Reopen") macOS can refuse the activation,
+        // which would leave the window hidden behind Settings and look like the app never came back.
+        window?.orderFrontRegardless()
     }
 
     // MARK: menu
