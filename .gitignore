@@ -1,0 +1,45 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+*.resolved.orig
+
+# Xcode
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+*.xcarchive
+
+# Built bundles
+*.app
+
+# Signing material
+*.p12
+*.cer
+*.mobileprovision
+*.provisionprofile
+
+# Local environment
+.env
+.env.*
+
+# Recorded audio and downloaded models
+*.wav
+*.caf
+*.m4a
+*.mlmodelc
+*.mlpackage
