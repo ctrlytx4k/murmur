@@ -6,12 +6,15 @@ import SwiftUI
 /// key, or one modifier pressed and released on its own. Esc cancels.
 struct KeyRecorder: View {
     @Binding var shortcut: Shortcut
+    var name = "Dictation shortcut"
+    /// Draws the amber conflict ring.
+    var flagged = false
     @State private var armed = false
     @State private var heldCaps: [String] = []
     @State private var monitor: Any?
     @State private var loneModifier: UInt16?
 
-    private var conflict: Bool { shortcut.systemConflict != nil }
+    private var conflict: Bool { flagged }
 
     var body: some View {
         Button {
@@ -31,7 +34,7 @@ struct KeyRecorder: View {
             .contentShape(Pill())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Dictation shortcut, \(shortcut.spokenName)")
+        .accessibilityLabel("\(name), \(shortcut.spokenName)")
         .accessibilityHint(armed ? "Press the new shortcut, or Escape to cancel" : "Click to record a new shortcut")
         .onDisappear(perform: disarm)
     }
