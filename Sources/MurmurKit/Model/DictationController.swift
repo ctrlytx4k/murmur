@@ -4,7 +4,7 @@ import Observation
 /// The single state machine. UI reads this and never calls services directly.
 @Observable
 public final class DictationController {
-    public static let levelCount = 56
+    public static let levelCount = 72
 
     public private(set) var state: DictationState = .idle
     public private(set) var permissions: PermissionSnapshot
@@ -219,6 +219,23 @@ public final class DictationController {
             try? await Task.sleep(for: delay)
             if self.stateToken == token { self.set(.idle) }
         }
+    }
+
+    // MARK: previews
+
+    /// Puts the controller in a fixed state without touching any service.
+    /// For design snapshots and the demo mode only.
+    func loadPreview(
+        state: DictationState, target: TargetApp? = nil, levels: [Float]? = nil, isSilent: Bool = false,
+        last: Transcription? = nil, canUndo: Bool = false, permissions: PermissionSnapshot? = nil
+    ) {
+        set(state)
+        self.target = target
+        if let levels { self.levels = levels }
+        self.isSilent = isSilent
+        lastTranscription = last
+        canUndoLast = canUndo
+        if let permissions { self.permissions = permissions }
     }
 
     // MARK: system defaults

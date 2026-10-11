@@ -1,1 +1,3 @@
-print("placeholder")
+import MurmurKit
+
+MurmurApp.main()
