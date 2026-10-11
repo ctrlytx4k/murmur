@@ -24,8 +24,15 @@ bundle() {
   cp Support/Info.plist "$app/Contents/Info.plist"
   mkdir -p "$app/Contents/Resources"
   cp -R THIRD-PARTY-NOTICES.md Licenses "$app/Contents/Resources/"
-  # Ad-hoc signature for local runs only. Release signing is not set up yet.
-  codesign --force --sign - "$app" 2>/dev/null
+  # Local runs only; release signing is not set up yet. A self-signed "Murmur Local Dev"
+  # certificate in the keychain keeps the signature the same across rebuilds, so macOS keeps the
+  # Accessibility and Input Monitoring grants. Without one we fall back to ad-hoc.
+  identity="${MURMUR_SIGN_IDENTITY:-Murmur Local Dev}"
+  if security find-identity -p codesigning | grep -q "\"$identity\""; then
+    codesign --force --sign "$identity" "$app" 2>/dev/null
+  else
+    codesign --force --sign - "$app" 2>/dev/null
+  fi
 }
 
 case "${1:-build}" in
