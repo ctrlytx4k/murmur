@@ -35,23 +35,37 @@ final class FloatingPanel: NSPanel {
     }
 
     private var onResize: ((CGSize) -> Void)?
+    private var measure: (() -> CGSize)?
+    private var lastSize = CGSize.zero
 
     func setContent(_ view: some View, onResize: @escaping (CGSize) -> Void) {
         let root = view
             .shadow(color: .black.opacity(0.16), radius: 18, y: 10)
             .padding(Self.margin)
             .fixedSize()
-            .onGeometryChange(for: CGSize.self) { $0.size } action: { onResize($0) }
-        contentView = NSHostingView(rootView: root)
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { [weak self] in self?.resize(to: $0) }
+        let host = NSHostingController(rootView: AnyView(root))
+        // The panel sizes itself (below). Left to its defaults, the hosting view also resizes the window
+        // on every SwiftUI layout pass, from the corner, which made the card slide and jump once a second.
+        host.sizingOptions = []
+        contentViewController = host
         self.onResize = onResize
+        measure = { [weak host] in host?.sizeThatFits(in: CGSize(width: 4000, height: 4000)) ?? .zero }
         sizeToContent()
     }
 
     /// The panel starts at zero size, and a zero-size window never lays out its content,
     /// so the size has to be asked for rather than waited on.
     func sizeToContent() {
-        guard let size = contentView?.fittingSize, size.width > 0 else { return }
-        onResize?(size)
+        if let size = measure?() { resize(to: size) }
+    }
+
+    /// Moves only when the size really changed, so a ticking timer or a level meter never nudges the panel.
+    private func resize(to size: CGSize) {
+        let rounded = CGSize(width: size.width.rounded(.up), height: size.height.rounded(.up))
+        guard rounded.width > 0, rounded != lastSize else { return }
+        lastSize = rounded
+        onResize?(rounded)
     }
 
     static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
@@ -103,7 +117,7 @@ final class OverlayController {
         guard size.width > 0, let screen = NSScreen.main else { return }
         let area = screen.visibleFrame
         let origin = NSPoint(x: area.midX - size.width / 2, y: area.minY + 64 - FloatingPanel.margin)
-        panel.setFrame(NSRect(origin: origin, size: size), display: true)
+        panel.setFrame(NSRect(origin: origin, size: size), display: true, animate: false)
     }
 }
 
@@ -226,6 +240,6 @@ final class StatusItemController: NSObject {
         x = min(x, screen.visibleFrame.maxX - size.width + margin - 8)
         x = max(x, screen.visibleFrame.minX - margin + 8)
         let y = anchor.minY - 6 - size.height + margin
-        panel.setFrame(NSRect(x: x, y: y, width: size.width, height: size.height), display: true)
+        panel.setFrame(NSRect(x: x, y: y, width: size.width, height: size.height), display: true, animate: false)
     }
 }

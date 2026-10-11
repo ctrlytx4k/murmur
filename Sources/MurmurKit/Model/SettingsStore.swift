@@ -115,6 +115,9 @@ public final class SettingsStore {
     /// Nil means "follow the system default input".
     public var microphoneID: String? { didSet { save(microphoneID, "microphoneID") } }
     public var hasCompletedOnboarding: Bool { didSet { save(hasCompletedOnboarding, "hasCompletedOnboarding") } }
+    /// Where onboarding got to. macOS quits an app when some permissions are switched in System Settings,
+    /// so on the next launch onboarding picks up at the same step instead of starting over.
+    public var onboardingStep: Int { didSet { save(onboardingStep, "onboardingStep") } }
 
     // Hotkeys
     public var shortcut: Shortcut { didSet { saveCodable(shortcut, "shortcut") } }
@@ -183,6 +186,7 @@ public final class SettingsStore {
         updateChannel = raw("updateChannel", .stable)
         microphoneID = defaults.string(forKey: "microphoneID")
         hasCompletedOnboarding = bool("hasCompletedOnboarding", false)
+        onboardingStep = defaults.integer(forKey: "onboardingStep")
 
         shortcut = codable("shortcut", .doubleTapOption)
         behavior = raw("behavior", .pushToTalk)

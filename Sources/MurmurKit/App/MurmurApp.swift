@@ -109,7 +109,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         if arguments.contains("--tour") {
             Task { await self.tour() }
         } else if !settings.hasCompletedOnboarding || arguments.contains("--onboarding") {
-            showOnboarding(at: .welcome)
+            showOnboarding(at: OnboardingStep(rawValue: settings.onboardingStep) ?? .welcome)
         }
     }
 

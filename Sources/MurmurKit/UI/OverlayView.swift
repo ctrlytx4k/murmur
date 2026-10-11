@@ -63,8 +63,9 @@ struct OverlayView: View {
                 .background(Tokens.warningSoft, in: RoundedRectangle(cornerRadius: Tokens.Radius.card, style: .continuous))
                 .padding(EdgeInsets(top: 10, leading: 10, bottom: 4, trailing: 10))
             } else {
-                Text(controller.isLatched ? "Listening hands-free… press \(settings.shortcut.keycaps.joined(separator: " ")) again to insert" : "Listening…")
-                    .font(.mmTranscript).foregroundStyle(Tokens.labelSecondary)
+                Text(controller.isLatched || settings.shortcut.isDoubleTap ? "Listening… \(settings.shortcut.keycaps.joined(separator: " ")) again to insert" : "Listening…")
+                    .font(.mmTranscript).lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading).foregroundStyle(Tokens.labelSecondary)
                     .padding(EdgeInsets(top: 10, leading: 16, bottom: 4, trailing: 16))
             }
 

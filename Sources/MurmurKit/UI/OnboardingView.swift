@@ -55,10 +55,21 @@ struct OnboardingView: View {
         .foregroundStyle(Tokens.label)
         .onReceive(poll) { _ in controller.refreshPermissions() }
         .onChange(of: step, initial: true) { _, new in
+            settings.onboardingStep = new.rawValue
             if new == .microphone { meter.start() } else { meter.stop() }
         }
         .onChange(of: controller.permissions.microphone) { _, isOn in
             if isOn, step == .microphone { meter.start() }
+        }
+        .onChange(of: controller.permissions) { old, new in
+            // A permission step that just turned green moves on by itself after a beat. The microphone
+            // step stays, so the level meter can be seen moving.
+            guard let permission = step.permission, permission != .microphone, !old.isGranted(permission), new.isGranted(permission) else { return }
+            let current = step
+            Task {
+                try? await Task.sleep(for: .seconds(1.2))
+                if step == current { advance() }
+            }
         }
         .onDisappear { meter.stop() }
     }
@@ -283,6 +294,7 @@ struct OnboardingView: View {
             step = next
         } else {
             settings.hasCompletedOnboarding = true
+            settings.onboardingStep = 0
             onFinish()
         }
     }
