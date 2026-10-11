@@ -207,7 +207,7 @@ struct HistoryView: View {
             Spacer(minLength: 0)
             HStack(spacing: 10) {
                 Image(systemName: "lock").font(.system(size: 12))
-                Text("On this Mac only · \(retentionText) · \(stores.settings.savesAudio ? "audio saved" : "no audio saved")")
+                Text("On this Mac only · \(retentionText) · no audio saved")
                 Spacer()
                 HStack(spacing: 6) {
                     hint("↩"); Text("re-insert")

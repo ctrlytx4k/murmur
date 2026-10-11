@@ -177,9 +177,6 @@ private struct GeneralPane: View {
                 PopPicker("Sound set", selection: bind(settings, \.soundSet)).disabled(!settings.soundsEnabled)
                 Toggle("Sounds", isOn: bind(settings, \.soundsEnabled)).toggleStyle(MurmurToggleStyle())
             }
-            SettingsRow(title: "Overlay position", subtitle: "Falls back to screen bottom when the caret can’t be found") {
-                PopPicker("Overlay position", selection: bind(settings, \.overlayPosition))
-            }
             SettingsRow(
                 title: "Microphone",
                 subtitle: stores.controller.permissions.microphone ? "System Default follows the input chosen in System Settings" : "Microphone access is off",
@@ -218,16 +215,6 @@ private struct GeneralPane: View {
                     selection: bind(settings, \.appearance), height: 26
                 )
                 .frame(width: 234)
-            }
-        }
-
-        SettingsGroup(title: "Updates") {
-            SettingsRow(title: "Check for updates automatically", subtitle: "Downloads are signed and verified before install", showsDivider: false) {
-                PopPicker("Update channel", selection: bind(settings, \.updateChannel)).disabled(!settings.checksForUpdates)
-                Toggle("Check for updates automatically", isOn: bind(settings, \.checksForUpdates)).toggleStyle(MurmurToggleStyle())
-            }
-            SettingsRow(title: "Murmur \(AppInfo.version)", subtitle: "Update checks aren’t connected in this build yet") {
-                Button("Check Now") {}.buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5)).disabled(true)
             }
         }
     }
@@ -269,7 +256,7 @@ private struct HotkeysPane: View {
         }
 
         SettingsGroup(title: "Other shortcuts") {
-            ShortcutRow(settings: settings, title: "Cycle mode", subtitle: "Raw → Cleaned up → Command", keyPath: \.cycleModeShortcut, fallback: Shortcut(keyCode: 46, modifiers: .option), first: true)
+            ShortcutRow(settings: settings, title: "Cycle mode", subtitle: "Raw → Cleaned up", keyPath: \.cycleModeShortcut, fallback: Shortcut(keyCode: 46, modifiers: .option), first: true)
             ShortcutRow(settings: settings, title: "Re-insert last transcription", subtitle: nil, keyPath: \.reinsertShortcut, fallback: Shortcut(keyCode: 9, modifiers: [.control, .option]))
             ShortcutRow(settings: settings, title: "Open History", subtitle: nil, keyPath: \.historyShortcut, fallback: Shortcut(keyCode: 4, modifiers: [.control, .option]))
             SettingsRow(title: "Cancel dictation", subtitle: "Fixed while recording, so it never collides with app shortcuts") {
