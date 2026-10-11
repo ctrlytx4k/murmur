@@ -138,6 +138,15 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
 
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// Opening the app again while it is already running (from Finder, Spotlight or the Dock) should
+    /// show something. A menu bar app has no window by default, which reads as "it didn't open".
+    public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows {
+            if settings.hasCompletedOnboarding { showSettings(nil) } else { showOnboarding(at: OnboardingStep(rawValue: settings.onboardingStep) ?? .welcome) }
+        }
+        return true
+    }
+
     // MARK: services
 
     /// Keeps the hotkey tap, the loaded speech model and the feedback sounds in step with settings,
