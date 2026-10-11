@@ -82,6 +82,7 @@ public final class DictationController {
         self.insertedHold = insertedHold
         self.errorHold = errorHold
         self.permissions = permissions.snapshot()
+        DebugLog.log("permissions \(Self.describe(self.permissions))")
     }
 
     // MARK: inputs
@@ -179,7 +180,9 @@ public final class DictationController {
 
     public func refreshPermissions() {
         let fresh = permissionsService.snapshot()
-        if fresh != permissions { permissions = fresh }
+        guard fresh != permissions else { return }
+        DebugLog.log("permissions \(Self.describe(fresh))")
+        permissions = fresh
     }
 
     public func request(_ permission: Permission) {
@@ -321,6 +324,10 @@ public final class DictationController {
             try? await Task.sleep(for: delay)
             if self.stateToken == token { self.set(.idle) }
         }
+    }
+
+    private static func describe(_ permissions: PermissionSnapshot) -> String {
+        Permission.allCases.map { "\($0.rawValue) \(permissions.isGranted($0) ? "on" : "off")" }.joined(separator: ", ")
     }
 
     /// State name for the debug log, without any transcript text.
