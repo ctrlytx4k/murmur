@@ -20,11 +20,11 @@ public enum Tokens {
     public static let labelSecondary = dynamic(light: rgba(28, 32, 44, 0.78), dark: rgba(240, 242, 250, 0.74))
     public static let labelTertiary = dynamic(light: rgba(28, 32, 44, 0.62), dark: rgba(240, 242, 250, 0.58))
 
-    // Accent: Ice. The only color in the chrome.
-    public static let accent = dynamic(light: 0x0A64D8, dark: 0x6CB6FF)
-    public static let onAccent = dynamic(light: 0xFFFFFF, dark: 0x04172E)
-    public static let accentText = dynamic(light: 0x0A5FC0, dark: 0x8CCBFF)
-    public static let accentSoft = dynamic(light: rgba(10, 100, 216, 0.10), dark: rgba(140, 203, 255, 0.15))
+    // Accent: Ice by default. The only color in the chrome; it follows the choice in Settings.
+    public static let accent = dynamic { Accent.current.fill(dark: $0) }
+    public static let onAccent = dynamic { Accent.current.onFill(dark: $0) }
+    public static let accentText = dynamic { Accent.current.text(dark: $0) }
+    public static let accentSoft = dynamic { Accent.current.soft(dark: $0) }
 
     // Status. Reserved: never used for decoration.
     public static let recording = dynamic(light: 0xD92D20, dark: 0xFF6259)
@@ -33,6 +33,9 @@ public enum Tokens {
     public static let successSoft = dynamic(light: rgba(27, 132, 53, 0.12), dark: rgba(61, 212, 103, 0.15))
     public static let warning = dynamic(light: 0xA35400, dark: 0xFFB340)
     public static let warningSoft = dynamic(light: rgba(196, 110, 0, 0.13), dark: rgba(255, 179, 64, 0.14))
+    /// Command mode only.
+    public static let command = dynamic(light: 0x5A3FD0, dark: 0xB9B3FF)
+    public static let commandSoft = dynamic(light: rgba(90, 63, 208, 0.10), dark: rgba(163, 156, 255, 0.16))
 
     public enum Radius {
         public static let keycap: CGFloat = 6
@@ -51,19 +54,24 @@ public enum Tokens {
 
     // MARK: construction helpers
 
-    static func rgba(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat) -> NSColor {
+    nonisolated static func rgba(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat) -> NSColor {
         NSColor(srgbRed: r / 255, green: g / 255, blue: b / 255, alpha: a)
     }
 
-    static func hex(_ value: UInt32) -> NSColor {
+    nonisolated static func hex(_ value: UInt32) -> NSColor {
         rgba(CGFloat((value >> 16) & 0xFF), CGFloat((value >> 8) & 0xFF), CGFloat(value & 0xFF), 1)
     }
 
     static func dynamic(light: UInt32, dark: UInt32) -> Color { dynamic(light: hex(light), dark: hex(dark)) }
 
     static func dynamic(light: NSColor, dark: NSColor) -> Color {
+        dynamic { $0 ? dark : light }
+    }
+
+    /// `resolve` gets true for dark appearances. It runs at draw time, on whatever thread is drawing.
+    static func dynamic(_ resolve: @escaping @Sendable (Bool) -> NSColor) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+            resolve(appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
         })
     }
 }
