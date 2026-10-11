@@ -62,6 +62,9 @@ public final class LiveAudioCapture: AudioCaptureService {
     private var worker: CaptureWorker?
     private var onLevel: ((Float) -> Void)?
     private var configObserver: NSObjectProtocol?
+    private var deviceAtStart: String?
+    private var startedAt = Date.distantPast
+    private var restartPending = false
 
     public init() {}
 
@@ -78,6 +81,9 @@ public final class LiveAudioCapture: AudioCaptureService {
         engine.prepare()
         try engine.start()
         self.engine = engine
+        deviceAtStart = AudioDevices.systemDefaultName
+        startedAt = Date()
+        DebugLog.log("audio started on \(deviceAtStart ?? "unknown device")")
 
         configObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.inputChanged() }
@@ -110,19 +116,37 @@ public final class LiveAudioCapture: AudioCaptureService {
         { buffer, _ in worker.process(buffer) }
     }
 
-    /// A microphone was unplugged or the default changed. Keep the take going on whatever is there now.
+    /// The engine's configuration changed. Starting the engine can itself cause this (macOS builds an
+    /// internal aggregate device), and several can arrive together, so they are collapsed into one restart.
     private func inputChanged() {
+        DebugLog.log("audio configuration change, \(Int(Date().timeIntervalSince(startedAt) * 1000)) ms after start")
+        guard engine != nil, !restartPending else { return }
+        restartPending = true
+        Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            self.restartPending = false
+            self.restartAfterChange()
+        }
+    }
+
+    private func restartAfterChange() {
         guard let engine else { return }
+        // Still running on the same microphone: nothing to do, and nothing to tell the user.
+        let device = AudioDevices.systemDefaultName
+        if engine.isRunning, device == deviceAtStart { return }
         engine.inputNode.removeTap(onBus: 0)
-        let kept = worker?.take() ?? []
+        preserved += worker?.take() ?? []
         worker = nil
         do {
             try install(on: engine)
-            if !kept.isEmpty { preserved += kept }
-            try engine.start()
-            onDeviceChange?("Microphone changed. Now using \(AudioDevices.systemDefaultName ?? "the system default").")
+            if !engine.isRunning { try engine.start() }
+            DebugLog.log("audio restarted on \(device ?? "unknown device")")
+            if device != deviceAtStart {
+                deviceAtStart = device
+                onDeviceChange?("Microphone changed. Now using \(device ?? "the system default").")
+            }
         } catch {
-            preserved += kept
+            DebugLog.log("audio restart failed: \(error)")
             onDeviceChange?("The microphone was disconnected.")
         }
     }

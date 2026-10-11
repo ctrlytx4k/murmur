@@ -54,6 +54,22 @@ final class FloatingPanel: NSPanel {
         sizeToContent()
     }
 
+    /// For content whose size changes while it is on screen (the overlay). The panel is a fixed, transparent
+    /// canvas and the content is pinned to one edge inside it, so nothing ever resizes or moves the window:
+    /// a card that grows simply grows within the canvas.
+    func setContent(_ view: some View, canvas: CGSize, alignment: Alignment, onPlace: @escaping (CGSize) -> Void) {
+        let root = view
+            .shadow(color: .black.opacity(0.16), radius: 18, y: 10)
+            .padding(Self.margin)
+            .frame(width: canvas.width, height: canvas.height, alignment: alignment)
+        let host = NSHostingController(rootView: AnyView(root))
+        host.sizingOptions = []
+        contentViewController = host
+        onResize = onPlace
+        measure = { canvas }
+        sizeToContent()
+    }
+
     /// The panel starts at zero size, and a zero-size window never lays out its content,
     /// so the size has to be asked for rather than waited on.
     func sizeToContent() {
@@ -104,11 +120,14 @@ final class OverlayController {
 
     init(stores: Stores, actions: AppActions) {
         self.controller = stores.controller
-        panel.setContent(OverlayView(stores: stores).environment(\.appActions, actions)) { [weak self] size in
+        panel.setContent(OverlayView(stores: stores).environment(\.appActions, actions), canvas: Self.canvas, alignment: .bottom) { [weak self] size in
             self?.place(size)
         }
         observeChanges { [weak self] in self?.update() }
     }
+
+    /// Wide enough for the 400 pt card and tall enough for the tallest state, plus shadow room.
+    private static let canvas = CGSize(width: 448, height: 300)
 
     private func update() {
         if controller.state == .idle { panel.fadeOut() } else { panel.fadeIn() }
@@ -118,8 +137,11 @@ final class OverlayController {
     private func place(_ size: CGSize) {
         guard size.width > 0, let screen = NSScreen.main else { return }
         let area = screen.visibleFrame
-        let origin = NSPoint(x: area.midX - size.width / 2, y: area.minY + 64 - FloatingPanel.margin)
-        panel.setFrame(NSRect(origin: origin, size: size), display: true, animate: false)
+        let origin = NSPoint(x: (area.midX - size.width / 2).rounded(), y: area.minY + 64 - FloatingPanel.margin)
+        let frame = NSRect(origin: origin, size: size)
+        guard panel.frame != frame else { return }
+        DebugLog.log("overlay placed at \(Int(frame.minX)),\(Int(frame.minY)) size \(Int(frame.width))x\(Int(frame.height))")
+        panel.setFrame(frame, display: true, animate: false)
     }
 }
 

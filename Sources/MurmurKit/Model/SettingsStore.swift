@@ -157,7 +157,7 @@ public final class SettingsStore {
     public var trimsSilence: Bool { didSet { save(trimsSilence, "trimsSilence") } }
     public var silenceThreshold: Double { didSet { save(silenceThreshold, "silenceThreshold") } }
     public var maxLength: MaxLength { didSet { save(maxLength.rawValue, "maxLength") } }
-    public var debugLog: Bool { didSet { save(debugLog, "debugLog") } }
+    public var debugLog: Bool { didSet { save(debugLog, "debugLog"); DebugLog.isEnabled = debugLog } }
 
     /// Mirrors SMAppService, which is the source of truth. Refreshed whenever Settings opens.
     public private(set) var launchAtLogin = false
@@ -222,6 +222,7 @@ public final class SettingsStore {
         debugLog = bool("debugLog", false)
 
         Accent.current = accent
+        DebugLog.isEnabled = debugLog
     }
 
     /// Puts every setting back to its default. Onboarding stays completed.

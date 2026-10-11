@@ -87,6 +87,7 @@ public final class DictationController {
     // MARK: inputs
 
     public func hotkey(_ event: HotkeyEvent) {
+        DebugLog.log("hotkey \(event)")
         switch (event, settings.behavior) {
         case (.cancel, _): cancel()
         case (.down, .pushToTalk):
@@ -268,6 +269,7 @@ public final class DictationController {
 
     /// The audio service calls this when the input device changes under a take. The notice clears itself.
     public func noteDeviceChange(_ message: String) {
+        DebugLog.log("device notice: \(message)")
         deviceNotice = message
         Task {
             try? await Task.sleep(for: .seconds(4))
@@ -290,6 +292,7 @@ public final class DictationController {
     private func set(_ new: DictationState) -> Int {
         stateToken += 1
         if !new.isRecording, isLatched { isLatched = false }
+        DebugLog.log("state \(Self.describe(new))")
         state = new
         return stateToken
     }
@@ -304,6 +307,17 @@ public final class DictationController {
         Task {
             try? await Task.sleep(for: delay)
             if self.stateToken == token { self.set(.idle) }
+        }
+    }
+
+    /// State name for the debug log, without any transcript text.
+    private static func describe(_ state: DictationState) -> String {
+        switch state {
+        case .idle: "idle"
+        case .recording: "recording"
+        case .processing: "processing"
+        case .inserted(let summary): "inserted (\(summary.wordCount) words)"
+        case .error(let error): "error: \(error.title)"
         }
     }
 
