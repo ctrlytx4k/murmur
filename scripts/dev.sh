@@ -22,6 +22,8 @@ bundle() {
   mkdir -p "$app/Contents/MacOS"
   cp .build/release/Murmur "$app/Contents/MacOS/Murmur"
   cp Support/Info.plist "$app/Contents/Info.plist"
+  mkdir -p "$app/Contents/Resources"
+  cp -R THIRD-PARTY-NOTICES.md Licenses "$app/Contents/Resources/"
   # Ad-hoc signature for local runs only. Release signing is not set up yet.
   codesign --force --sign - "$app" 2>/dev/null
 }
