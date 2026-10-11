@@ -19,6 +19,7 @@ public nonisolated struct Transcription: Equatable, Sendable {
     public var text: String
     public var date: Date
     public var appName: String
+    public var mode: DictationMode = .raw
 }
 
 /// Every way a take can fail. Each one carries the words the user sees: what
@@ -33,6 +34,8 @@ public nonisolated enum DictationError: Equatable, Sendable {
     case insertionFailed(appName: String)
     case transcriptionFailed(String)
     case engineUnavailable(String)
+    /// The shortcut was pressed before any speech model was ready.
+    case modelNotReady(name: String, progress: Double)
 
     public var title: String {
         switch self {
@@ -45,6 +48,7 @@ public nonisolated enum DictationError: Equatable, Sendable {
         case .insertionFailed(let app): "Couldn’t type into \(app)"
         case .transcriptionFailed: "Couldn’t transcribe that"
         case .engineUnavailable: "Dictation isn’t available"
+        case .modelNotReady: "Your model is still downloading"
         }
     }
 
@@ -59,6 +63,7 @@ public nonisolated enum DictationError: Equatable, Sendable {
         case .insertionFailed: "Your text is on the clipboard. Click where it should go and press ⌘V."
         case .transcriptionFailed(let reason): "Nothing was typed. \(reason)"
         case .engineUnavailable(let reason): reason
+        case .modelNotReady(let name, let progress): "\(name) · \(Int(progress * 100))% downloaded. Dictation starts working as soon as it finishes."
         }
     }
 

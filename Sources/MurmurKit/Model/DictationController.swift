@@ -16,6 +16,8 @@ public final class DictationController {
     public private(set) var isSilent = false
     public private(set) var lastTranscription: Transcription?
     public private(set) var canUndoLast = false
+    /// A short notice shown in the overlay mid-take, such as a microphone that was unplugged.
+    public private(set) var deviceNotice: String?
 
     public var engineName: String { engine.displayName }
 
@@ -24,6 +26,9 @@ public final class DictationController {
     @ObservationIgnored private let insertion: any TextInsertionService
     @ObservationIgnored private let permissionsService: any PermissionsService
     @ObservationIgnored private let settings: SettingsStore
+    @ObservationIgnored private let cleanup: (any TextCleanupService)?
+    @ObservationIgnored private let history: HistoryStore?
+    @ObservationIgnored private var recordingStarted = Date.distantPast
     @ObservationIgnored private let frontmostApp: @MainActor () -> TargetApp?
     @ObservationIgnored private let copyToClipboard: @MainActor (String) -> Void
     @ObservationIgnored private let now: () -> Date
@@ -44,6 +49,8 @@ public final class DictationController {
         insertion: any TextInsertionService,
         permissions: any PermissionsService,
         settings: SettingsStore,
+        cleanup: (any TextCleanupService)? = nil,
+        history: HistoryStore? = nil,
         frontmostApp: @escaping @MainActor () -> TargetApp? = DictationController.systemFrontmostApp,
         copyToClipboard: @escaping @MainActor (String) -> Void = DictationController.systemCopy,
         now: @escaping () -> Date = Date.init,
@@ -55,6 +62,8 @@ public final class DictationController {
         self.insertion = insertion
         self.permissionsService = permissions
         self.settings = settings
+        self.cleanup = cleanup
+        self.history = history
         self.frontmostApp = frontmostApp
         self.copyToClipboard = copyToClipboard
         self.now = now
@@ -96,6 +105,8 @@ public final class DictationController {
             return fail(.noInputDevice)
         }
         lastSoundAt = now()
+        recordingStarted = now()
+        deviceNotice = nil
         set(.recording(since: now()))
     }
 
@@ -139,10 +150,8 @@ public final class DictationController {
     }
 
     public func reinsertLast() {
-        guard let last = lastTranscription, state == .idle else { return }
-        target = frontmostApp()
-        let token = set(.processing)
-        pendingWork = Task { await self.insert(last.text, token: token) }
+        guard let last = lastTranscription else { return }
+        reinsert(last.text, mode: last.mode)
     }
 
     public func undoLast() {
@@ -154,29 +163,44 @@ public final class DictationController {
     // MARK: the take
 
     private func finish(_ token: Int) async {
-        let text: String
+        let raw: String
+        let seconds: Double
         do {
             let clip = try await audio.stop()
-            text = try await engine.transcribe(clip).trimmingCharacters(in: .whitespacesAndNewlines)
+            seconds = max(clip.duration, now().timeIntervalSince(recordingStarted))
+            raw = try await engine.transcribe(clip).trimmingCharacters(in: .whitespacesAndNewlines)
         } catch is ServiceUnavailable {
             return fail(.engineUnavailable("No transcription engine is connected in this build yet."), ifStill: token)
         } catch {
             return fail(.transcriptionFailed(error.localizedDescription), ifStill: token)
         }
         guard token == stateToken else { return }  // cancelled meanwhile
-        guard !text.isEmpty else { return fail(.nothingHeard) }
-        await insert(text, token: token)
+        guard !raw.isEmpty else { return fail(.nothingHeard) }
+
+        // Cleanup is optional and never blocks a take: if it fails, the raw text goes in.
+        var text = raw
+        let mode = settings.mode
+        if mode == .cleaned, settings.cleanupEnabled, let cleanup {
+            let instructions = settings.cleanupPreset == .custom ? settings.customInstructions : settings.cleanupPreset.builtInInstructions
+            text = (try? await cleanup.clean(raw, instructions: instructions)) ?? raw
+            guard token == stateToken else { return }
+        }
+        await insert(text, token: token, raw: text == raw ? nil : raw, mode: mode, audioSeconds: seconds)
     }
 
-    private func insert(_ text: String, token: Int) async {
+    private func insert(_ text: String, token: Int, raw: String? = nil, mode: DictationMode? = nil, audioSeconds: Double = 0) async {
         // Checked at the last moment: the user may have tabbed into a password field while speaking.
         guard !insertion.isSecureInputActive else { return fail(.secureInput, ifStill: token) }
         let app = target?.name ?? "the front app"
+        let mode = mode ?? lastTranscription?.mode ?? settings.mode
         do {
             let receipt = try await insertion.insert(text)
             lastReceipt = receipt
-            lastTranscription = Transcription(text: text, date: now(), appName: app)
+            lastTranscription = Transcription(text: text, date: now(), appName: app, mode: mode)
             canUndoLast = true
+            history?.add(
+                HistoryEntry(date: now(), appName: app, bundleIdentifier: target?.bundleIdentifier, mode: mode, text: text, raw: raw, audioSeconds: audioSeconds, engine: engine.displayName),
+                retention: settings.retention)
             guard token == stateToken else { return }
             let words = text.split(whereSeparator: \.isWhitespace).count
             let held = set(.inserted(InsertionSummary(appName: app, wordCount: words)))
@@ -184,9 +208,26 @@ public final class DictationController {
         } catch {
             // The insertion service leaves the text on the clipboard when it cannot place it.
             lastReceipt = nil
-            lastTranscription = Transcription(text: text, date: now(), appName: app)
+            lastTranscription = Transcription(text: text, date: now(), appName: app, mode: mode)
             canUndoLast = false
             fail(.insertionFailed(appName: app), ifStill: token)
+        }
+    }
+
+    /// Re-inserts any earlier text, from History or the dropdown.
+    public func reinsert(_ text: String, mode: DictationMode) {
+        guard state == .idle else { return }
+        target = frontmostApp()
+        let token = set(.processing)
+        pendingWork = Task { await self.insert(text, token: token, mode: mode) }
+    }
+
+    /// The audio service calls this when the input device changes under a take. The notice clears itself.
+    public func noteDeviceChange(_ message: String) {
+        deviceNotice = message
+        Task {
+            try? await Task.sleep(for: .seconds(4))
+            if self.deviceNotice == message { self.deviceNotice = nil }
         }
     }
 
@@ -227,8 +268,9 @@ public final class DictationController {
     /// For design snapshots and the demo mode only.
     func loadPreview(
         state: DictationState, target: TargetApp? = nil, levels: [Float]? = nil, isSilent: Bool = false,
-        last: Transcription? = nil, canUndo: Bool = false, permissions: PermissionSnapshot? = nil
+        last: Transcription? = nil, canUndo: Bool = false, permissions: PermissionSnapshot? = nil, deviceNotice: String? = nil
     ) {
+        self.deviceNotice = deviceNotice
         set(state)
         self.target = target
         if let levels { self.levels = levels }

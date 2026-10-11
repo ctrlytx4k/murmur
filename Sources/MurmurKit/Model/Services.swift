@@ -49,6 +49,11 @@ public protocol TextInsertionService: AnyObject {
     func undo(_ receipt: InsertionReceipt) async -> Bool
 }
 
+/// Optional local cleanup of a transcript. Used by Cleaned up mode.
+public protocol TextCleanupService: AnyObject {
+    func clean(_ text: String, instructions: String) async throws -> String
+}
+
 /// Placeholders for the services the spike has not signed off yet. Every call
 /// fails loudly so the UI shows a real error instead of pretending to work.
 public final class UnavailableAudioCapture: AudioCaptureService {
