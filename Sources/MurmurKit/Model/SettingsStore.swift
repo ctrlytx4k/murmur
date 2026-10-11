@@ -65,8 +65,8 @@ public nonisolated enum CleanupPreset: String, CaseIterable, Sendable {
     public var builtInInstructions: String {
         switch self {
         case .lightTouch: "Fix punctuation, capitalization and obvious mis-hearings. Remove filler words (um, uh, like). Keep the speaker’s wording and tone. Never add new content."
-        case .polished: "Rewrite into clear, tight sentences. Keep the meaning, the facts and the speaker’s voice. Never add new content."
-        case .notes: "Turn the text into short bullet points, one idea per line. Keep names, numbers and dates exactly. Never add new content."
+        case .polished: "Rewrite into clear, tight sentences. Keep the meaning, the facts and the speaker’s voice. A question stays a question and a request stays a request, addressed to the same person. Never add new content."
+        case .notes: "Turn the text into short bullet points, one idea per line, each starting with a hyphen. Keep names, numbers and dates exactly. A question stays a question and a request stays a request. Never add new content."
         case .custom: ""
         }
     }
