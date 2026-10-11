@@ -13,6 +13,8 @@ public nonisolated struct AudioClip: Sendable {
 public nonisolated enum HotkeyEvent: Sendable {
     /// The dictation shortcut went down or came up.
     case down, up
+    /// A double-tap shortcut fired: start if idle, stop and insert if recording.
+    case toggle
     /// Esc while recording.
     case cancel
     /// Return while recording in toggle mode: stop and insert.

@@ -13,6 +13,9 @@ struct KeyRecorder: View {
     @State private var heldCaps: [String] = []
     @State private var monitor: Any?
     @State private var loneModifier: UInt16?
+    /// A modifier that was just tapped once. A second tap within the window makes it a double-tap shortcut.
+    @State private var firstTap: UInt16?
+    @State private var pendingSingle: DispatchWorkItem?
 
     private var conflict: Bool { flagged }
 
@@ -54,6 +57,9 @@ struct KeyRecorder: View {
         monitor = nil
         armed = false
         heldCaps = []
+        firstTap = nil
+        pendingSingle?.cancel()
+        pendingSingle = nil
     }
 
     private func handle(_ event: NSEvent) {
@@ -63,15 +69,31 @@ struct KeyRecorder: View {
             if flags.isEmpty {
                 // Everything released. A modifier pressed alone becomes the shortcut.
                 if let key = loneModifier {
-                    shortcut = Shortcut(keyCode: key, modifiers: [], isModifierOnly: true)
-                    disarm()
+                    pendingSingle?.cancel()
+                    if let first = firstTap, HotkeyDecision.modifierFlag(first) == HotkeyDecision.modifierFlag(key) {
+                        // Tapped twice: a double-tap shortcut, either side.
+                        shortcut = Shortcut(keyCode: first, modifiers: [], isDoubleTap: true)
+                        disarm()
+                    } else {
+                        // Wait a moment in case a second tap is coming.
+                        firstTap = key
+                        heldCaps = [(Shortcut.modifierSymbols[key] ?? "") + " …tap again for ×2"]
+                        let single = DispatchWorkItem {
+                            shortcut = Shortcut(keyCode: key, modifiers: [], isModifierOnly: true)
+                            disarm()
+                        }
+                        pendingSingle = single
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: single)
+                    }
                 }
             } else {
-                loneModifier = heldCaps.isEmpty ? event.keyCode : nil
-                heldCaps = Shortcut(keyCode: 0, modifiers: flags).keycaps.dropLast().map { $0 }
+                loneModifier = (heldCaps.isEmpty || firstTap != nil) ? event.keyCode : nil
+                if firstTap == nil { heldCaps = Shortcut(keyCode: 0, modifiers: flags).keycaps.dropLast().map { $0 } }
             }
         case .keyDown:
             loneModifier = nil
+            firstTap = nil
+            pendingSingle?.cancel()
             if event.keyCode == UInt16(kVK_Escape) { return disarm() }
             let isFunctionKey = event.modifierFlags.contains(.function) && event.specialKey != nil
             // A bare letter would fire every time it is typed, so ask for a modifier.

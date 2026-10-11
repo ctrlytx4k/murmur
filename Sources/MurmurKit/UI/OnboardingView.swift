@@ -173,6 +173,11 @@ struct OnboardingView: View {
                         Text("turn on ") + Text("Murmur").fontWeight(.semibold).foregroundStyle(Tokens.labelSecondary)
                     }
                     .font(.mmSub).foregroundStyle(Tokens.labelTertiary)
+                    if permission != .microphone {
+                        // macOS ties these grants to the exact build. After a rebuild the switch still looks on but no longer counts.
+                        Text("Already switched on? Select Murmur in that list, remove it with −, then add it again with +.")
+                            .font(.mmSub).foregroundStyle(Tokens.labelTertiary).fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
                 .background(Tokens.elevated, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -203,9 +208,11 @@ struct OnboardingView: View {
                 .foregroundStyle(controller.permissions.allGranted ? Tokens.success : Tokens.warning)
             Text("Try it now").font(.system(size: 24, weight: .bold)).kerning(-0.2)
             HStack(spacing: 5) {
-                Text(settings.behavior == .pushToTalk ? "Click the field, hold" : "Click the field, press")
+                let tap = settings.shortcut.isDoubleTap
+                let hold = !tap && settings.behavior == .pushToTalk
+                Text(tap ? "Click the field, tap" : (hold ? "Click the field, hold" : "Click the field, press"))
                 ForEach(settings.shortcut.keycaps, id: \.self) { Keycap(text: $0) }
-                Text(settings.behavior == .pushToTalk ? "and say a sentence, then let go." : "and say a sentence, then press it again.")
+                Text(tap ? ", say a sentence, then tap it twice again." : (hold ? "and say a sentence, then let go." : "and say a sentence, then press it again."))
             }
             .font(.system(size: 13.5)).foregroundStyle(Tokens.labelSecondary)
 

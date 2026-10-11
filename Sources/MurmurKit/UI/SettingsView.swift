@@ -248,10 +248,19 @@ private struct HotkeysPane: View {
 
     var body: some View {
         SettingsGroup(title: "Dictation") {
-            ShortcutRow(settings: settings, title: "Shortcut", subtitle: "Works in every app while Murmur is running", keyPath: \.shortcut, fallback: .optionSpace, first: true)
-            SettingsRow(title: "Behavior", subtitle: settings.behavior == .pushToTalk ? "Hold to talk, release to insert" : "Press once to start, again to insert") {
-                SegmentedPicker(options: [(.pushToTalk, "Push-to-talk"), (.toggle, "Toggle")], selection: bind(settings, \.behavior))
+            ShortcutRow(settings: settings, title: "Shortcut", subtitle: "Works in every app while Murmur is running", keyPath: \.shortcut, fallback: .doubleTapOption, first: true)
+            SettingsRow(
+                title: "Behavior",
+                subtitle: settings.shortcut.isDoubleTap
+                    ? "Double-tap to start, double-tap again to insert. Holding needs a held shortcut such as ⌥ Space."
+                    : (settings.behavior == .pushToTalk ? "Hold to talk, release to insert" : "Press once to start, again to insert")
+            ) {
+                SegmentedPicker(
+                    options: [(.pushToTalk, "Push-to-talk"), (.toggle, "Toggle")],
+                    selection: settings.shortcut.isDoubleTap ? .constant(.toggle) : bind(settings, \.behavior))
                     .frame(width: 240)
+                    .disabled(settings.shortcut.isDoubleTap)
+                    .opacity(settings.shortcut.isDoubleTap ? 0.5 : 1)
             }
             SwitchRow(
                 title: "Tap to keep listening",

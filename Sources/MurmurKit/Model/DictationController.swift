@@ -107,6 +107,7 @@ public final class DictationController {
         case (.down, .toggle): toggle()
         case (.up, .toggle): break
         case (.commit, _): stopAndInsert()
+        case (.toggle, _): toggle()
         }
     }
 

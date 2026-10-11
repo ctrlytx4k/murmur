@@ -4,6 +4,12 @@ import Testing
 @testable import MurmurKit
 
 @Suite struct HotkeyDecisionTests {
+    @Test func oldSavedShortcutsStillDecode() throws {
+        let old = Data(#"{"keyCode":49,"modifiers":524288,"isModifierOnly":false}"#.utf8)
+        #expect(try JSONDecoder().decode(Shortcut.self, from: old) == Shortcut.optionSpace)
+        #expect(Shortcut.doubleTapOption.keycaps == ["⌥ ×2"])
+    }
+
     private let option: UInt64 = 0x8_0000, command: UInt64 = 0x10_0000
     private func config(_ dictation: Shortcut = .optionSpace, toggle: Bool = false, recording: Bool = false) -> TapConfig {
         TapConfig(
@@ -40,6 +46,32 @@ import Testing
         let down = HotkeyDecision.decide(type: .flagsChanged, keyCode: 61, flags: option | 0x40, autorepeat: false, config: &c)
         #expect(down.output == .event(.down) && !down.swallow)
         #expect(HotkeyDecision.decide(type: .flagsChanged, keyCode: 61, flags: 0, autorepeat: false, config: &c).output == .event(.up))
+    }
+
+    @Test func doubleTapOptionTogglesAndIgnoresSlowOrBusyPresses() {
+        let ms: UInt64 = 1_000_000
+        var c = config(.doubleTapOption)
+        func tap(_ down: Bool, at t: UInt64, key: UInt16 = 58) -> TapOutput? {
+            HotkeyDecision.decide(type: .flagsChanged, keyCode: key, flags: down ? option : 0, autorepeat: false, time: t * ms, config: &c).output
+        }
+        // Two quick taps, the second on the other Option key: fires on the second press.
+        #expect(tap(true, at: 1000) == nil)
+        #expect(tap(false, at: 1080) == nil)
+        #expect(tap(true, at: 1250, key: 61) == .event(.toggle))
+        #expect(tap(false, at: 1320, key: 61) == nil)
+
+        // Two taps too far apart are just two taps.
+        #expect(tap(true, at: 5000) == nil)
+        #expect(tap(false, at: 5080) == nil)
+        #expect(tap(true, at: 6000) == nil)
+        #expect(tap(false, at: 6080) == nil)
+
+        // Option held to type an accent is not a tap, so a tap right after it does not count as the second.
+        #expect(tap(true, at: 9000) == nil)
+        _ = HotkeyDecision.decide(type: .keyDown, keyCode: 14, flags: option, autorepeat: false, time: 9050 * ms, config: &c)
+        #expect(tap(false, at: 9100) == nil)
+        #expect(tap(true, at: 9200) == nil)
+        #expect(tap(false, at: 9260) == nil)
     }
 
     @Test func escapeAndReturnOnlyActWhileRecording() {

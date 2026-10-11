@@ -7,6 +7,9 @@ nonisolated struct TapConfig: Sendable {
     var bindings: HotkeyBindings?
     var recording = false
     var dictationDown = false
+    /// Double-tap tracking, in event-timestamp nanoseconds. Zero means "nothing pending".
+    var tapDownAt: UInt64 = 0
+    var lastTapAt: UInt64 = 0
 }
 
 nonisolated enum TapOutput: Equatable, Sendable {
@@ -20,15 +23,33 @@ nonisolated enum HotkeyDecision {
     static let modifierMasks: [UInt16: UInt64] = [54: 0x10, 55: 0x08, 56: 0x02, 60: 0x04, 58: 0x20, 61: 0x40, 59: 0x01, 62: 0x2000, 63: 0x80_0000]
     /// Command, Option, Control, Shift. Same bit positions in CGEventFlags and NSEvent.ModifierFlags.
     static let relevantModifiers: UInt64 = 0x1E_0000
+    /// A tap is a press shorter than this; a double-tap is two taps closer together than `doubleTapGap`.
+    static let tapLength: UInt64 = 350_000_000
+    static let doubleTapGap: UInt64 = 450_000_000
+
+    /// The flag shared by the left and right versions of a modifier key.
+    static func modifierFlag(_ keyCode: UInt16) -> UInt64? {
+        switch keyCode {
+        case 58, 61: 0x8_0000
+        case 54, 55: 0x10_0000
+        case 59, 62: 0x4_0000
+        case 56, 60: 0x2_0000
+        case 63: 0x80_0000
+        default: nil
+        }
+    }
 
     /// Returns what to report, and whether to swallow the event so the front app never sees it.
-    static func decide(type: CGEventType, keyCode: UInt16, flags: UInt64, autorepeat: Bool, config: inout TapConfig) -> (output: TapOutput?, swallow: Bool) {
+    static func decide(type: CGEventType, keyCode: UInt16, flags: UInt64, autorepeat: Bool, time: UInt64 = 0, config: inout TapConfig) -> (output: TapOutput?, swallow: Bool) {
         guard let bindings = config.bindings else { return (nil, false) }
         let dictation = bindings.dictation
         let modifiers = UInt(flags & relevantModifiers)
 
         switch type {
         case .keyDown:
+            // A modifier used with another key is a shortcut or an accent, not a tap.
+            config.tapDownAt = 0
+            config.lastTapAt = 0
             if config.recording {
                 if keyCode == UInt16(kVK_Escape) { return (.event(.cancel), true) }
                 if bindings.returnCommits, keyCode == UInt16(kVK_Return), modifiers == 0 { return (.event(.commit), true) }
@@ -49,6 +70,28 @@ nonisolated enum HotkeyDecision {
                 return (.event(.up), true)
             }
         case .flagsChanged:
+            if dictation.isDoubleTap, let flag = modifierFlag(dictation.keyCode) {
+                guard modifierFlag(keyCode) == flag else {
+                    config.tapDownAt = 0
+                    config.lastTapAt = 0
+                    return (nil, false)
+                }
+                let down = flags & flag != 0
+                let alone = flags & relevantModifiers & ~flag == 0
+                if down {
+                    if alone, config.lastTapAt != 0, time &- config.lastTapAt < doubleTapGap {
+                        // Second press, soon after a tap: that is the double-tap.
+                        config.lastTapAt = 0
+                        config.tapDownAt = 0
+                        return (.event(.toggle), false)
+                    }
+                    config.tapDownAt = alone ? max(time, 1) : 0
+                } else {
+                    config.lastTapAt = config.tapDownAt != 0 && time &- config.tapDownAt < tapLength ? max(time, 1) : 0
+                    config.tapDownAt = 0
+                }
+                return (nil, false)
+            }
             if dictation.isModifierOnly, keyCode == dictation.keyCode, let mask = modifierMasks[keyCode] {
                 let down = flags & mask != 0
                 if down != config.dictationDown {
@@ -84,7 +127,8 @@ private nonisolated func hotkeyTapCallback(proxy: CGEventTapProxy, type: CGEvent
     let keyCode = UInt16(truncatingIfNeeded: event.getIntegerValueField(.keyboardEventKeycode))
     let autorepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
     let flags = event.flags.rawValue
-    let result = shared.config.withLock { HotkeyDecision.decide(type: type, keyCode: keyCode, flags: flags, autorepeat: autorepeat, config: &$0) }
+    let time = event.timestamp
+    let result = shared.config.withLock { HotkeyDecision.decide(type: type, keyCode: keyCode, flags: flags, autorepeat: autorepeat, time: time, config: &$0) }
     if let output = result.output { shared.deliver(output) }
     return result.swallow ? nil : Unmanaged.passUnretained(event)
 }
@@ -166,7 +210,11 @@ public final class LiveHotkeyService: HotkeyService {
 
     public func update(bindings: HotkeyBindings) {
         shared?.config.withLock {
-            if $0.bindings?.dictation != bindings.dictation { $0.dictationDown = false }
+            if $0.bindings?.dictation != bindings.dictation {
+                $0.dictationDown = false
+                $0.tapDownAt = 0
+                $0.lastTapAt = 0
+            }
             $0.bindings = bindings
         }
     }

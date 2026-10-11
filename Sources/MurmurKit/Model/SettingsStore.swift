@@ -184,7 +184,7 @@ public final class SettingsStore {
         microphoneID = defaults.string(forKey: "microphoneID")
         hasCompletedOnboarding = bool("hasCompletedOnboarding", false)
 
-        shortcut = codable("shortcut", .optionSpace)
+        shortcut = codable("shortcut", .doubleTapOption)
         behavior = raw("behavior", .pushToTalk)
         doubleTapToLock = bool("doubleTapToLock", true)
         cycleModeShortcut = codable("cycleModeShortcut", Shortcut(keyCode: 46, modifiers: .option))
@@ -268,7 +268,7 @@ public final class SettingsStore {
     }
 
     public var hotkeyBindings: HotkeyBindings {
-        HotkeyBindings(dictation: shortcut, cycleMode: cycleModeShortcut, reinsert: reinsertShortcut, history: historyShortcut, returnCommits: behavior == .toggle)
+        HotkeyBindings(dictation: shortcut, cycleMode: cycleModeShortcut, reinsert: reinsertShortcut, history: historyShortcut, returnCommits: behavior == .toggle || shortcut.isDoubleTap)
     }
 
     private func save(_ value: Any?, _ key: String) { defaults.set(value, forKey: key) }

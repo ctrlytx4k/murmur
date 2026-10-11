@@ -74,7 +74,7 @@ struct OverlayView: View {
                 ElapsedTime(since: since).font(.mmMono).foregroundStyle(Tokens.labelTertiary)
                 HStack(spacing: 4) {
                     hintKey("esc")
-                    if settings.behavior == .toggle || controller.isLatched { hintKey("↩") }
+                    if settings.behavior == .toggle || controller.isLatched || settings.shortcut.isDoubleTap { hintKey("↩") }
                 }
             }
             .padding(EdgeInsets(top: 6, leading: 16, bottom: 12, trailing: 12))
