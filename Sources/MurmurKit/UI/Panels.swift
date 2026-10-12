@@ -92,50 +92,111 @@ final class FloatingPanel: NSPanel {
     }
 }
 
-/// Shows the overlay card near the bottom of the screen for as long as a take is in flight.
+/// Where the overlay window goes: the canvas frame, and which edge of it the card is pinned to.
+nonisolated struct OverlayPlacement: Equatable {
+    var origin: CGPoint
+    /// True when the card hangs from the top of its canvas and grows downward.
+    var growsDown: Bool
+
+    /// Room kept between the card and the caret, and between the card and the screen edge.
+    static let gap: CGFloat = 8
+    /// The tallest the card gets, with a panel open.
+    static let tallestCard: CGFloat = 240
+
+    /// `visible` is the screen without the menu bar and the Dock. `caret` is only passed for "under the cursor";
+    /// without one the card goes to the bottom, where it has always been.
+    static func resolve(_ appearance: OverlayAppearance, canvas: CGSize, visible: CGRect, caret: CGRect?, margin: CGFloat) -> OverlayPlacement {
+        let centered = (visible.midX - canvas.width / 2).rounded()
+        if appearance.position == .underCursor, let caret {
+            let lowest = visible.minX + gap - margin, highest = visible.maxX - gap + margin - canvas.width
+            let x = max(lowest, min(caret.midX - canvas.width / 2, max(lowest, highest))).rounded()
+            if caret.minY - gap - tallestCard >= visible.minY {
+                return OverlayPlacement(origin: CGPoint(x: x, y: (caret.minY - gap + margin - canvas.height).rounded()), growsDown: true)
+            }
+            // No room under the line being typed: sit above it and grow upward.
+            return OverlayPlacement(origin: CGPoint(x: x, y: (caret.maxY + gap - margin).rounded()), growsDown: false)
+        }
+        if appearance.position == .top {
+            return OverlayPlacement(origin: CGPoint(x: centered, y: (visible.maxY - appearance.edgeDistance + margin - canvas.height).rounded()), growsDown: true)
+        }
+        return OverlayPlacement(origin: CGPoint(x: centered, y: (visible.minY + appearance.edgeDistance - margin).rounded()), growsDown: false)
+    }
+}
+
+/// Shows the overlay card for as long as a take is in flight, where Settings › Overlay says.
 final class OverlayController {
     private let panel = FloatingPanel(level: .statusBar, allowsKey: false)
     private let controller: DictationController
     private let settings: SettingsStore
     private let panels: OverlayPanelState
-    private var position: SettingsStore.OverlayPosition?
+    private let view: AnyView
+    private let caretRect: @MainActor () -> CGRect?
+    private var growsDown: Bool?
+    private var frame = NSRect.zero
+    private var isShown = false
+    /// Where the caret was when this take began. The card stays there for the whole take.
+    private var caret: CGRect?
+    private var lookedForCaret = false
 
-    init(stores: Stores, actions: AppActions) {
+    init(stores: Stores, actions: AppActions, caretRect: @escaping @MainActor () -> CGRect? = CaretLocator.caretRect) {
         self.controller = stores.controller
         self.settings = stores.settings
         self.panels = stores.overlay
-        let view = OverlayView(stores: stores).environment(\.appActions, actions)
-        observeChanges { [weak self] in self?.pin(view) }
+        self.caretRect = caretRect
+        self.view = AnyView(OverlayView(stores: stores).environment(\.appActions, actions))
+        layout()
         observeChanges { [weak self] in self?.update() }
     }
 
+    /// Wide enough for the large card and tall enough for the tallest state, plus shadow room.
+    private static let canvas = CGSize(width: OverlayAppearance.Size.large.cardWidth + 2 * FloatingPanel.margin, height: 420)
+
+    /// Runs on every change of the take or of the overlay settings, so a change in Settings moves a card that is showing.
+    private func update() {
+        if !controller.state.isRecording, panels.open != nil { panels.open = nil }
+        let visible = controller.state != .idle
+        if !visible {
+            isShown = false
+            caret = nil
+            lookedForCaret = false
+            _ = settings.overlay
+            return panel.fadeOut()
+        }
+        isShown = true
+        layout()
+        panel.fadeIn()
+    }
+
     /// The window is a fixed canvas and the card is pinned to one edge of it. At the bottom of the screen the
-    /// bottom edge stays put and an open panel grows the card upward, clear of the Dock; at the top it grows down.
-    private func pin(_ view: some View) {
-        let position = settings.overlayPosition
-        guard position != self.position else { return }
-        self.position = position
-        panel.setContent(view, canvas: Self.canvas, alignment: position == .top ? .top : .bottom) { [weak self] size in
-            self?.place(size)
+    /// bottom edge stays put and an open panel grows the card upward, clear of the Dock; at the top, and under
+    /// the caret, it grows down.
+    private func layout() {
+        let appearance = settings.overlay
+        if appearance.position == .underCursor, isShown, !lookedForCaret {
+            lookedForCaret = true
+            caret = caretRect()
+            DebugLog.log(caret == nil ? "overlay: no caret reported, using the bottom" : "overlay: placed by the caret")
+        }
+        let anchor = appearance.position == .underCursor ? caret : nil
+        guard let screen = screen(for: appearance, caret: anchor) else { return }
+        let placement = OverlayPlacement.resolve(appearance, canvas: Self.canvas, visible: screen.visibleFrame, caret: anchor, margin: FloatingPanel.margin)
+        frame = NSRect(origin: placement.origin, size: Self.canvas)
+        if placement.growsDown != growsDown {
+            growsDown = placement.growsDown
+            panel.setContent(view, canvas: Self.canvas, alignment: placement.growsDown ? .top : .bottom) { [weak self] _ in self?.place() }
+        } else {
+            place()
         }
     }
 
-    /// Wide enough for the 400 pt card and tall enough for the tallest state, plus shadow room.
-    private static let canvas = CGSize(width: 448, height: 380)
-
-    private func update() {
-        if !controller.state.isRecording, panels.open != nil { panels.open = nil }
-        if controller.state == .idle { panel.fadeOut() } else { panel.fadeIn() }
+    private func screen(for appearance: OverlayAppearance, caret: CGRect?) -> NSScreen? {
+        if let caret, let screen = NSScreen.screens.first(where: { $0.frame.contains(CGPoint(x: caret.midX, y: caret.midY)) }) { return screen }
+        // NSScreen.main is the display with the window being typed into; the first screen is the one with the menu bar.
+        return (appearance.display == .mainScreen ? NSScreen.screens.first : NSScreen.main) ?? NSScreen.main
     }
 
-    /// Centered: 64 pt above the Dock, or just below the menu bar.
-    private func place(_ size: CGSize) {
-        guard size.width > 0, let screen = NSScreen.main else { return }
-        let area = screen.visibleFrame
-        let y = position == .top ? area.maxY - 8 - size.height + FloatingPanel.margin : area.minY + 64 - FloatingPanel.margin
-        let origin = NSPoint(x: (area.midX - size.width / 2).rounded(), y: y)
-        let frame = NSRect(origin: origin, size: size)
-        guard panel.frame != frame else { return }
+    private func place() {
+        guard frame.width > 0, panel.frame != frame else { return }
         DebugLog.log("overlay placed at \(Int(frame.minX)),\(Int(frame.minY)) size \(Int(frame.width))x\(Int(frame.height))")
         panel.setFrame(frame, display: true, animate: false)
     }
