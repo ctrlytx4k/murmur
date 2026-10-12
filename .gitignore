@@ -43,3 +43,4 @@ xcuserdata/
 *.m4a
 *.mlmodelc
 *.mlpackage
+dist/
