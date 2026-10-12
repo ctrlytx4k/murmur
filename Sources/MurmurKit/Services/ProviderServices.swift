@@ -5,6 +5,9 @@ import Security
 /// account = the provider's id. This is the only place a key is ever written.
 public final class KeychainKeyStore: ProviderKeyStore {
     private let service: String
+    /// Keys already read since launch, so the Keychain is asked once per provider, not once per take.
+    /// Memory only; gone when Murmur quits.
+    private var read: [String: String] = [:]
 
     public init(service: String = "\(Bundle.main.bundleIdentifier ?? "app.murmur.Murmur").provider") {
         self.service = service
@@ -15,17 +18,21 @@ public final class KeychainKeyStore: ProviderKeyStore {
     }
 
     public func key(for id: String) -> String? {
+        if let known = read[id] { return known }
         var query = query(id)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        let key = String(data: data, encoding: .utf8)
+        read[id] = key
+        return key
     }
 
     @discardableResult
     public func setKey(_ key: String, for id: String) -> Bool {
         let data = Data(key.utf8)
+        read[id] = nil
         let status = SecItemUpdate(query(id) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if status == errSecSuccess { return true }
         guard status == errSecItemNotFound else { return false }
@@ -36,6 +43,7 @@ public final class KeychainKeyStore: ProviderKeyStore {
     }
 
     public func removeKey(for id: String) {
+        read[id] = nil
         SecItemDelete(query(id) as CFDictionary)
     }
 }
