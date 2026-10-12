@@ -6,6 +6,7 @@ import SwiftUI
 ///   --onboarding         show onboarding even if it was completed
 ///   --snapshots <dir>    render every screen to PNG files and exit
 ///   --selftest <audio>   transcribe a file with both real engines, print the result, and exit
+///   --matrix <file>      type a test sentence into Notes, Terminal, Safari and Chrome and write what happened
 ///   --tour               with --demo: open each surface in turn, then quit (a smoke test)
 public final class MurmurApp: NSObject, NSApplicationDelegate {
     private let arguments: [String]
@@ -38,6 +39,10 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         }
         if let index = delegate.arguments.firstIndex(of: "--snapshots"), delegate.arguments.count > index + 1 {
             Snapshots.render(to: URL(fileURLWithPath: delegate.arguments[index + 1]))
+            return
+        }
+        if let index = delegate.arguments.firstIndex(of: "--matrix"), delegate.arguments.count > index + 1 {
+            InsertionMatrix.run(output: delegate.arguments[index + 1])
             return
         }
         app.delegate = delegate
