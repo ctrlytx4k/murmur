@@ -302,6 +302,33 @@ private final class FakeMeetingAudio: MeetingAudioService {
         #expect(result.note?.hasPrefix("1 line your microphone picked up from the speakers was left out") == true)
     }
 
+    @Test func aReplyMadeOfTheSameSmallWordsIsNotAnEcho() {
+        let monologue = "I think the plan is fine and that is what we said last week, so it is right to do the onboarding first and then I can look at the engine step"
+        // Nearly every word was also said on the call, but not in this order: it is a reply, not the speakers.
+        #expect(!EchoFilter.isEcho(microphone: "Yeah, I think it is right, that is the plan to do", call: monologue))
+        // The real thing, with a word misheard and a word lost on the way across the room.
+        #expect(EchoFilter.isEcho(microphone: "the plan is fine and that is what we set last week so it is right to the onboarding first", call: monologue))
+    }
+
+    @Test func aLineSaidInTheCallsSilenceIsKeptEvenWhenItRepeatsTheCall() async throws {
+        #expect(EchoFilter.overlap(of: 2...4, with: [0...3]) == 0.5)
+        #expect(EchoFilter.overlap(of: 2...4, with: [0...3, 2.5...3.5, 3.5...10]) == 1)
+        #expect(EchoFilter.overlap(of: 2...4, with: [5...6]) == 0)
+        // Only the words of a long turn that were being said at that moment count.
+        #expect(EchoFilter.said("one two three four five six seven eight nine ten", over: 0...20, during: 4...8) == "three four")
+
+        final class Parrot: TranscriptionEngine {
+            let displayName = "parrot"
+            func transcribe(_ clip: AudioClip) async throws -> String { "so the deadline is Friday the tenth then" }
+        }
+        // The call says it from 1 s to 4 s; you read it back straight afterwards. Both are kept.
+        let result = try await MeetingTranscriber.transcribe(
+            microphone: MeetingFakeTrack.of([(4.4, false), (3, true), (1, false)]),
+            call: MeetingFakeTrack.of([(1, false), (3, true), (4.4, false)]), engine: Parrot(), onProgress: { _ in })
+        #expect(result.lines.map(\.speaker) == [.others, .you])
+        #expect(result.note == nil)
+    }
+
     // MARK: speakers
 
     @Test func turnsAreJoinedTidiedAndNumberedInOrderOfFirstSpeaking() {
@@ -533,6 +560,42 @@ private final class FakeMeetingAudio: MeetingAudioService {
         rig.controller.stop()
         await rig.controller.pendingWork?.value
         #expect(rig.store.meetings[0].note?.contains("No call audio was heard") == true)
+    }
+
+    @Test func theSilentCallIsStillSaidWhenTheTranscriptIsMadeAfterARelaunch() async {
+        let rig = rig()
+        rig.audio.result = MeetingRecording(duration: 30, callWasSilent: true)
+        rig.controller.start()
+        rig.controller.stopForQuit()
+        #expect(rig.store.meetings[0].callWasSilent == true)
+
+        let store = MeetingStore(directory: rig.store.directory)
+        let later = MeetingController(audio: rig.audio, engine: rig.engine, store: store, settings: rig.settings, permissions: rig.permissions) { _ in
+            MeetingFakeTrack.of([(1, false), (2, true), (1, false)])
+        }
+        later.transcribe(store.meetings[0].id)
+        await later.pendingWork?.value
+        #expect(store.meetings[0].isTranscribed && store.meetings[0].note?.contains("No call audio was heard") == true)
+    }
+
+    @Test func aMeetingSavedBeforeTheSilentFlagExistedStillLoads() throws {
+        let old = """
+        {"date":771000000,"duration":12,"hasAudio":true,"id":"6F0B2B0A-0000-4000-8000-000000000001","includesCallAudio":true,"isTranscribed":false,"lines":[],"title":"Old meeting"}
+        """
+        let meeting = try JSONDecoder().decode(Meeting.self, from: Data(old.utf8))
+        #expect(meeting.title == "Old meeting" && meeting.callWasSilent == nil && meeting.marks == nil && meeting.speakerNames == nil)
+    }
+
+    @Test func aCallThatStartsWhileTranscribingIsOfferedOnceThatIsDone() async {
+        let rig = rig()
+        rig.controller.start()
+        rig.controller.stop()
+        #expect(!rig.controller.state.isIdle)
+        rig.controller.microphoneUsers(["us.zoom.xos"])
+        #expect(rig.controller.detectedCall == nil)
+        await rig.controller.pendingWork?.value
+        rig.controller.microphoneUsers(["us.zoom.xos"])
+        #expect(rig.controller.detectedCall?.name == "Zoom")
     }
 
     @Test func withoutTheMicrophoneNothingStartsAndTheReasonIsShown() {

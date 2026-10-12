@@ -45,7 +45,6 @@ public final class MeetingController {
     @ObservationIgnored private let separator: (any SpeakerSeparator)?
     @ObservationIgnored private var recordingID: UUID?
     @ObservationIgnored private var recordingCall = false
-    @ObservationIgnored private var silentCalls: Set<UUID> = []
     @ObservationIgnored private var marks: [Double] = []
     @ObservationIgnored private var callApps: Set<String> = []
     @ObservationIgnored private var declinedCalls: Set<String> = []
@@ -154,7 +153,8 @@ public final class MeetingController {
     public func microphoneUsers(_ bundleIdentifiers: Set<String>) {
         let apps = Set(bundleIdentifiers.compactMap { CallApp.matching($0)?.bundleIdentifier })
         let started = apps.subtracting(callApps)
-        callApps = apps
+        // A call that starts while the last meeting is still being transcribed is not forgotten: it is offered once that is done.
+        if case .transcribing = state { callApps.formIntersection(apps) } else { callApps = apps }
         declinedCalls.formIntersection(apps)
         if let waiting = detectedCall, !apps.contains(waiting.bundleIdentifier) { detectedCall = nil }
         guard settings.askWhenCallStarts, state.isIdle, detectedCall == nil else { return }
@@ -213,10 +213,11 @@ public final class MeetingController {
         let recording = audio.stop()
         recordingID = nil
         level = 0
-        if recording.callWasSilent { silentCalls.insert(id) }
         let title = "Meeting, \(since.formatted(date: .omitted, time: .shortened))"
         var meeting = Meeting(id: id, title: title, date: since, duration: recording.duration, includesCallAudio: recordingCall)
         if !marks.isEmpty { meeting.marks = marks }
+        // Kept on the meeting, so it is still said when the transcript is made after a quit or a failed attempt.
+        if recording.callWasSilent { meeting.callWasSilent = true }
         store.add(meeting)
         isPaused = false
         isMuted = false
@@ -230,6 +231,7 @@ public final class MeetingController {
     public func transcribe(_ id: UUID) {
         guard state.isIdle, let meeting = store.meeting(id), !meeting.isTranscribed, meeting.hasAudio else { return }
         state = .transcribing(id: id, progress: 0)
+        let callWasSilent = meeting.callWasSilent == true
         pendingWork = Task { [weak self] in
             guard let self else { return }
             do {
@@ -240,7 +242,7 @@ public final class MeetingController {
                 guard microphone != nil || call != nil else { throw MeetingTranscriptionFailure(message: "The recording’s audio is missing.") }
                 // Who spoke when on the call. Optional: without it, or if it fails, the call is one "Others".
                 var turns: [SpeakerTurn]?
-                if call != nil, !self.silentCalls.contains(id), self.settings.meetingSpeakers, let separator = self.separator, separator.isInstalled {
+                if call != nil, !callWasSilent, self.settings.meetingSpeakers, let separator = self.separator, separator.isInstalled {
                     self.isSeparatingSpeakers = true
                     do {
                         turns = try await separator.turns(in: callURL)
@@ -251,7 +253,7 @@ public final class MeetingController {
                     self.isSeparatingSpeakers = false
                 }
                 let result = try await MeetingTranscriber.transcribe(
-                    microphone: microphone, call: call, callWasSilent: self.silentCalls.contains(id), callTurns: turns, engine: self.engine
+                    microphone: microphone, call: call, callWasSilent: callWasSilent, callTurns: turns, engine: self.engine
                 ) { [weak self] progress in
                     self?.state = .transcribing(id: id, progress: progress)
                 }

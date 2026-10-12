@@ -96,6 +96,8 @@ public nonisolated struct Meeting: Codable, Equatable, Identifiable, Sendable {
     public var speakerNames: [String: String]?
     /// Moments the user marked while recording, in seconds from the start.
     public var marks: [Double]?
+    /// The call was meant to be recorded and nothing was heard on it.
+    public var callWasSilent: Bool?
 
     public init(id: UUID = UUID(), title: String, date: Date, duration: TimeInterval, includesCallAudio: Bool) {
         self.id = id
@@ -331,19 +333,50 @@ public nonisolated enum EchoFilter {
         text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
     }
 
-    /// True when nearly everything in a microphone line was also said on the call at the same time.
+    /// True when nearly everything in a microphone line was also said on the call, in the same order.
     /// Short lines are never treated as echo: "yes" and "okay" are said by everyone.
     public static func isEcho(microphone: String, call: String) -> Bool {
-        let mine = words(microphone)
+        let mine = words(microphone), others = words(call)
         guard mine.count >= 4 else { return false }
         var theirs: [String: Int] = [:]
-        for word in words(call) { theirs[word, default: 0] += 1 }
+        for word in others { theirs[word, default: 0] += 1 }
         var shared = 0
         for word in mine where (theirs[word] ?? 0) > 0 {
             theirs[word]! -= 1
             shared += 1
         }
-        return Double(shared) / Double(mine.count) >= 0.75
+        guard Double(shared) / Double(mine.count) >= 0.75 else { return false }
+        // The same small words turn up in anything said at length. An echo also keeps them next to each other:
+        // most of the neighbouring pairs in the microphone line must be neighbours on the call too.
+        var pairs: Set<String> = []
+        for index in others.indices.dropLast() { pairs.insert(others[index] + " " + others[index + 1]) }
+        let kept = mine.indices.dropLast().filter { pairs.contains(mine[$0] + " " + mine[$0 + 1]) }.count
+        return Double(kept) / Double(mine.count - 1) >= 0.6
+    }
+
+    /// The part of a call line that was being said during `window`, taking its words as evenly spread over the line.
+    /// A long turn on the call is then not held against a few words you said at one point in it.
+    public static func said(_ text: String, over range: ClosedRange<Double>, during window: ClosedRange<Double>) -> String {
+        let all = words(text)
+        let length = range.upperBound - range.lowerBound
+        guard length > 0, !all.isEmpty else { return all.joined(separator: " ") }
+        return all.enumerated().filter { window.contains(range.lowerBound + (Double($0.offset) + 0.5) / Double(all.count) * length) }.map(\.element).joined(separator: " ")
+    }
+
+    /// How much of `range` falls inside any of `others`, 0...1. An echo is heard while the call is speaking,
+    /// so a line said mostly in the call's silence is yours however much it repeats.
+    public static func overlap(of range: ClosedRange<Double>, with others: [ClosedRange<Double>]) -> Double {
+        let length = range.upperBound - range.lowerBound
+        guard length > 0 else { return 0 }
+        var covered = 0.0, reached = range.lowerBound
+        for other in others.sorted(by: { $0.lowerBound < $1.lowerBound }) {
+            let from = max(other.lowerBound, reached), to = min(other.upperBound, range.upperBound)
+            if to > from {
+                covered += to - from
+                reached = to
+            }
+        }
+        return covered / length
     }
 }
 
@@ -458,7 +491,9 @@ public enum MeetingTranscriber {
         let lines = heard.compactMap { entry -> MeetingLine? in
             guard entry.line.speaker == .you else { return entry.line }
             let nearby = heard.filter { $0.line.speaker == .others && $0.range.lowerBound <= entry.range.upperBound + 1.5 && $0.range.upperBound >= entry.range.lowerBound - 1.5 }
-            guard !nearby.isEmpty, EchoFilter.isEcho(microphone: entry.line.text, call: nearby.map(\.line.text).joined(separator: " ")) else { return entry.line }
+            // The call's ranges are widened a little: the two tracks are cut into turns separately, and sound takes a moment to cross the room.
+            let speaking = nearby.map { $0.range.lowerBound - 0.5...$0.range.upperBound + 0.5 }
+            guard !nearby.isEmpty, EchoFilter.overlap(of: entry.range, with: speaking) >= 0.5, EchoFilter.isEcho(microphone: entry.line.text, call: nearby.map { EchoFilter.said($0.line.text, over: $0.range, during: entry.range.lowerBound - 2...entry.range.upperBound + 2) }.joined(separator: " ")) else { return entry.line }
             echoes += 1
             return nil
         }
