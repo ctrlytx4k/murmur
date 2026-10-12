@@ -84,11 +84,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             self.router = router
 
             let hotkeys = LiveHotkeyService()
-            hotkeys.onEvent = { [weak self] event in
-                // Esc with an overlay menu open closes the menu, not the take.
-                if event == .cancel, GlassMenuPresenter.shared.closeOverlayMenu() { return }
-                self?.controller.hotkey(event)
-            }
+            hotkeys.onEvent = { [weak self] event in self?.handle(event) }
             hotkeys.onAction = { [weak self] action in self?.perform(action) }
             self.hotkeys = hotkeys
         }
@@ -142,18 +138,33 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         await pause(1.5)
         controller.start()
         await pause(1.5)
-        // A glass menu over the overlay: it must show without taking key, and leave with the take.
-        let overlayPanel = NSApp.windows.first { $0 is FloatingPanel && $0.isVisible && !$0.canBecomeKey }
-        GlassMenuPresenter.shared.toggle(id: "tour", anchor: overlayPanel?.contentView, keyboard: false, endsWithTake: true, items: [
-            GlassMenuItem(title: "Raw", detail: DictationMode.raw.summary, symbol: DictationMode.raw.symbol),
-            GlassMenuItem(title: "Cleaned up", detail: DictationMode.cleaned.summary, symbol: DictationMode.cleaned.symbol, isSelected: true),
-        ])
+        // The overlay's panels: the card grows in place, the take keeps running, Esc closes the panel first.
+        let collapsed = stores.overlay.cardFrame
+        guard case .recording(let since) = controller.state else { return print("tour: FAILED, not recording") }
+        stores.overlay.open = .mode
+        await pause(1)
+        let grown = stores.overlay.cardFrame
+        var stillRecording = controller.state == .recording(since: since)
+        print("tour: mode panel open, same take still recording \(stillRecording), card height \(Int(collapsed.height)) -> \(Int(grown.height)), bottom edge moved \(Int(grown.maxY - collapsed.maxY)), top edge moved \(Int(grown.minY - collapsed.minY))")
+        perform(.selectMode(0))
+        let picked = settings.mode
+        await pause(0.5)
+        print("tour: ⌥1 picked \(picked.label), panel collapsed \(stores.overlay.open == nil)")
+        perform(.selectMode(1))
+        stores.overlay.open = .actions
+        await pause(0.6)
+        handle(.cancel)
+        stillRecording = controller.state.isRecording
+        print("tour: first esc closed the panel \(stores.overlay.open == nil), still recording \(stillRecording)")
+        handle(.cancel)
+        print("tour: second esc cancelled the take \(controller.state == .idle)")
+        await pause(0.5)
+        controller.start()
         await pause(1.5)
-        let menu = NSApp.windows.first { $0 is GlassMenuPanel }
-        print("tour: menu visible \(menu?.isVisible ?? false), key \(menu?.isKeyWindow ?? false), still recording \(controller.state.isRecording), frame \(menu?.frame ?? .zero), screen \(NSScreen.main?.visibleFrame ?? .zero)")
+        stores.overlay.open = .actions
         controller.stopAndInsert()
         await pause(0.3)
-        print("tour: menu closed with the take \(!(menu?.isVisible ?? false))")
+        print("tour: panel closed with the take \(stores.overlay.open == nil)")
         await pause(3.5)
         statusItem.close()
         for pane in SettingsPane.allCases {
@@ -195,7 +206,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             try? hotkeys.start(bindings: bindings)
         }
         hotkeys.setRecording(controller.state.isRecording)
-        hotkeys.setOverlayMenuOpen(GlassMenuPresenter.shared.isOverlayMenuOpen)
+        hotkeys.setActionsOpen(stores.overlay.open == .actions)
 
         let state = controller.state
         if settings.soundsEnabled, state != lastSoundState {
@@ -271,13 +282,21 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The first Esc closes an open overlay panel; the take is only cancelled by the next one.
+    private func handle(_ event: HotkeyEvent) {
+        if event == .cancel, stores.overlay.open != nil { return stores.overlay.open = nil }
+        controller.hotkey(event)
+    }
+
     private func perform(_ action: HotkeyAction) {
         switch action {
         case .cycleMode: settings.mode = settings.mode.next
         case .reinsertLast: controller.reinsertLast()
         case .openHistory: showHistory()
         case .selectMode(let index):
-            if DictationMode.offered.indices.contains(index) { settings.mode = DictationMode.offered[index] }
+            guard DictationMode.offered.indices.contains(index) else { return }
+            settings.mode = DictationMode.offered[index]
+            if stores.overlay.open != nil { stores.overlay.collapseSoon() }
         }
     }
 

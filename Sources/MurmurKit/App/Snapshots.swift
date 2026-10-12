@@ -54,15 +54,6 @@ enum Snapshots {
         add("dropdown-idle", DropdownView(stores: st))
         add("dropdown-model-expanded", DropdownView(stores: st, expanded: .model))
         add("dropdown-microphone-expanded", DropdownView(stores: st, expanded: .microphone))
-        add("menu-overlay-mode", GlassMenu(items: [
-            GlassMenuItem(title: "Raw", detail: DictationMode.raw.summary, symbol: DictationMode.raw.symbol),
-            GlassMenuItem(title: "Cleaned up", detail: DictationMode.cleaned.summary, symbol: DictationMode.cleaned.symbol, isSelected: true),
-            .separator,
-            GlassMenuItem(title: "Insert now", keys: "↩"),
-            GlassMenuItem(title: "Copy instead", keys: "⌘C", isDisabled: true, disabledReason: "Nothing to copy"),
-            .separator,
-            GlassMenuItem(title: "Cancel take", keys: "esc", isDestructive: true),
-        ]))
         add("menu-microphone", GlassMenu(items: [
             .header("Input"),
             GlassMenuItem(title: "System Default", detail: "Follows System Settings · MacBook Pro Microphone"),
@@ -82,6 +73,12 @@ enum Snapshots {
         st = make(recording)
         add("dropdown-recording", DropdownView(stores: st))
         add("overlay-listening", OverlayView(stores: st))
+        st = make(recording)
+        st.overlay.open = .mode
+        add("overlay-mode-open", OverlayView(stores: st))
+        st = make(recording)
+        st.overlay.open = .actions
+        add("overlay-actions-open", OverlayView(stores: st))
         st = make(.idle, permissions: noMic, last: last)
         add("dropdown-permission-missing", DropdownView(stores: st))
         st = make(recording, silent: true, toggle: true)

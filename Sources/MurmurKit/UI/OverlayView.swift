@@ -9,6 +9,8 @@ struct OverlayView: View {
 
     private var controller: DictationController { stores.controller }
     private var settings: SettingsStore { stores.settings }
+    private var panels: OverlayPanelState { stores.overlay }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var cleaning: Bool { settings.mode == .cleaned && settings.cleanupEnabled && stores.controller.cleanupAvailability.isAvailable }
 
     var body: some View {
@@ -33,8 +35,8 @@ struct OverlayView: View {
             HStack(spacing: 6) {
                 targetLabel
                 Spacer()
-                modeMenu
-                moreMenu
+                modePill
+                moreButton
             }
             .frame(height: 26)
             .padding(EdgeInsets(top: 10, leading: 12, bottom: 0, trailing: 10))
@@ -50,24 +52,17 @@ struct OverlayView: View {
                 .padding(EdgeInsets(top: 10, leading: 10, bottom: 2, trailing: 10))
             }
 
-            if controller.isSilent {
-                HStack(spacing: 10) {
-                    Image(systemName: "mic.slash").font(.system(size: 13, weight: .medium)).foregroundStyle(Tokens.warning)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("No sound from microphone").font(.mmBodyEmphasis)
-                        Text(AudioDevices.displayName(for: settings.microphoneID)).font(.mmSub).foregroundStyle(Tokens.labelSecondary)
-                    }
-                    Spacer(minLength: 0)
+            // Only the body swaps. The header and the footer stay, so the dot, the waveform and the timer keep saying "still recording".
+            Group {
+                switch panels.open {
+                case .mode: modePanel
+                case .actions: actionsPanel
+                case nil: listeningBody
                 }
-                .padding(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
-                .background(Tokens.warningSoft, in: RoundedRectangle(cornerRadius: Tokens.Radius.card, style: .continuous))
-                .padding(EdgeInsets(top: 10, leading: 10, bottom: 4, trailing: 10))
-            } else {
-                Text(controller.isLatched || settings.shortcut.isDoubleTap ? "Listening… \(settings.shortcut.keycaps.joined(separator: " ")) again to insert" : "Listening…")
-                    .font(.mmTranscript).lineLimit(1).truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading).foregroundStyle(Tokens.labelSecondary)
-                    .padding(EdgeInsets(top: 10, leading: 16, bottom: 4, trailing: 16))
             }
+            .transition(.opacity.animation(.easeOut(duration: reduceMotion ? 0.1 : 0.15)))
+            // Reduce Motion: the animation is scoped to the body, so it crossfades while the card's height simply changes.
+            .animation(reduceMotion ? .easeOut(duration: 0.1) : nil, value: panels.open)
 
             HStack(spacing: 10) {
                 PulseDot(pulsing: !controller.isSilent)
@@ -82,8 +77,38 @@ struct OverlayView: View {
         }
         .frame(width: 400)
         .glassSurface(cornerRadius: Tokens.Radius.overlay)
-        .accessibilityElement(children: .ignore)
+        .background(GeometryReader { geo in
+            Color.clear.onChange(of: geo.frame(in: .global), initial: true) { _, frame in panels.cardFrame = frame }
+        })
+        // The height settles without a bounce. With Reduce Motion it does not animate: the body just crossfades.
+        .animation(reduceMotion ? nil : .spring(duration: 0.22, bounce: 0), value: panels.open)
+        .onChange(of: panels.open) { old, new in
+            let name = (new ?? old) == .mode ? "Mode" : "Actions"
+            AccessibilityNotification.Announcement("\(name), \(new == nil ? "collapsed" : "expanded")").post()
+        }
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Murmur is listening. Text will go into \(controller.target?.name ?? "the front app").")
+    }
+
+    @ViewBuilder private var listeningBody: some View {
+        if controller.isSilent {
+            HStack(spacing: 10) {
+                Image(systemName: "mic.slash").font(.system(size: 13, weight: .medium)).foregroundStyle(Tokens.warning)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("No sound from microphone").font(.mmBodyEmphasis)
+                    Text(AudioDevices.displayName(for: settings.microphoneID)).font(.mmSub).foregroundStyle(Tokens.labelSecondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
+            .background(Tokens.warningSoft, in: RoundedRectangle(cornerRadius: Tokens.Radius.card, style: .continuous))
+            .padding(EdgeInsets(top: 10, leading: 10, bottom: 4, trailing: 10))
+        } else {
+            Text(controller.isLatched || settings.shortcut.isDoubleTap ? "Listening… \(settings.shortcut.keycaps.joined(separator: " ")) again to insert" : "Listening…")
+                .font(.mmTranscript).lineLimit(1).truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading).foregroundStyle(Tokens.labelSecondary)
+                .padding(EdgeInsets(top: 10, leading: 16, bottom: 4, trailing: 16))
+        }
     }
 
     // MARK: processing
@@ -196,8 +221,12 @@ struct OverlayView: View {
 
     // MARK: pieces
 
-    private var modeMenu: some View {
-        GlassMenuButton(keyboard: false, endsWithTake: true, items: { modeItems }) { isOpen in
+    private var modePill: some View {
+        let isOpen = panels.open == .mode
+        return Button {
+            // From the actions panel this switches straight over: no close-then-open.
+            panels.open = isOpen ? nil : .mode
+        } label: {
             HStack(spacing: 4) {
                 Text(settings.mode.label).font(.system(size: 11.5, weight: .semibold))
                 Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)).rotationEffect(.degrees(isOpen ? 180 : 0))
@@ -208,36 +237,151 @@ struct OverlayView: View {
             .modifier(GlassMenuOpenHighlight(isOpen: isOpen, shape: Pill()))
             .contentShape(Pill())
         }
-        .fixedSize()
+        .buttonStyle(.plain).fixedSize()
         .accessibilityLabel("Mode, \(settings.mode.label)")
+        .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
     }
 
-    private var modeItems: [GlassMenuItem] {
-        var items = DictationMode.offered.enumerated().map { index, mode in
-            GlassMenuItem(title: mode.label, detail: mode.summary, symbol: mode.symbol, keys: "⌥\(index + 1)", isSelected: settings.mode == mode) { settings.mode = mode }
-        }
-        if settings.cleanupEnabled {
-            items += [.separator, .custom(CleanupStylePicker(settings: settings))]
-        }
-        return items
-    }
-
-    private var moreMenu: some View {
-        GlassMenuButton(keyboard: false, endsWithTake: true, items: {
-            [
-                GlassMenuItem(title: "Insert now", keys: settings.hotkeyBindings.returnCommits || controller.isLatched ? "↩" : nil) { controller.stopAndInsert() },
-                GlassMenuItem(title: "Copy instead", keys: "⌘C") { controller.stopAndCopy() },
-                .separator,
-                GlassMenuItem(title: "Cancel take", keys: "esc", isDestructive: true) { controller.cancel() },
-            ]
-        }) { isOpen in
-            Image(systemName: "ellipsis").font(.system(size: 11, weight: .bold)).foregroundStyle(Tokens.labelSecondary)
+    /// ⋯ opens the actions for this take. While either panel is open it is a ✕ that closes it.
+    private var moreButton: some View {
+        let isOpen = panels.open != nil
+        return Button {
+            panels.open = isOpen ? nil : .actions
+        } label: {
+            Image(systemName: isOpen ? "xmark" : "ellipsis").font(.system(size: isOpen ? 9 : 11, weight: .bold))
+                .foregroundStyle(panels.open == .actions ? Tokens.accentText : Tokens.labelSecondary)
                 .frame(width: 26, height: 26).chipPill()
-                .modifier(GlassMenuOpenHighlight(isOpen: isOpen, shape: Pill()))
+                .modifier(GlassMenuOpenHighlight(isOpen: panels.open == .actions, shape: Pill()))
                 .contentShape(Circle())
         }
-        .fixedSize()
-        .accessibilityLabel("More actions")
+        .buttonStyle(.plain).fixedSize()
+        .accessibilityLabel(isOpen ? "Close" : "More actions")
+    }
+
+    // MARK: panels
+
+    private func eyebrow(_ title: String, _ rest: String? = nil) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(title.uppercased()).font(.system(size: 10.5, weight: .bold)).kerning(0.5)
+            if let rest { Text(rest).font(.system(size: 11.5)) }
+        }
+        .foregroundStyle(Tokens.labelTertiary)
+        .padding(EdgeInsets(top: 12, leading: 16, bottom: 7, trailing: 16))
+        .accessibilityHidden(true)
+    }
+
+    private func keyChip(_ keys: String, destructive: Bool = false) -> some View {
+        Text(keys).font(.system(size: 10.5, weight: .medium))
+            .foregroundStyle(destructive ? Tokens.recording : Tokens.labelSecondary)
+            .padding(.horizontal, 5).frame(minWidth: 18).frame(height: 18)
+            .background(Tokens.chip, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Tokens.stroke, lineWidth: 0.5))
+            .accessibilityHidden(true)
+    }
+
+    private func iconTile(_ symbol: String, selected: Bool = false, destructive: Bool = false) -> some View {
+        Image(systemName: symbol).font(.system(size: 13, weight: .medium))
+            .foregroundStyle(destructive ? Tokens.recording : (selected ? Tokens.onAccent : Tokens.labelSecondary))
+            .frame(width: 30, height: 30)
+            .background(destructive ? .clear : (selected ? Tokens.accent : Tokens.controlStrong), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
+    private var modePanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            eyebrow("Mode", "· applies to this take")
+            HStack(spacing: 8) {
+                ForEach(Array(DictationMode.offered.enumerated()), id: \.element) { index, mode in
+                    modeTile(mode, keys: "⌥\(index + 1)")
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 12)
+            // To VoiceOver the tiles are one radio group with the current mode selected.
+            .accessibilityRepresentation {
+                Picker("Mode", selection: Binding(get: { settings.mode }, set: { pick($0) })) {
+                    ForEach(DictationMode.offered, id: \.self) { Text("\($0.label). \($0.summary)").tag($0) }
+                }
+                .pickerStyle(.radioGroup)
+            }
+            if settings.cleanupEnabled {
+                // Changing the style leaves the panel open.
+                HStack(spacing: 12) {
+                    Text("Style").font(.system(size: 12)).foregroundStyle(Tokens.labelTertiary)
+                    SegmentedPicker(
+                        options: [CleanupPreset.lightTouch, .polished, .notes].map { ($0, $0.name) },
+                        selection: bind(settings, \.cleanupPreset), height: 22)
+                }
+                .padding(EdgeInsets(top: 10, leading: 16, bottom: 0, trailing: 12))
+            }
+        }
+        .padding(.bottom, 4)
+    }
+
+    private func modeTile(_ mode: DictationMode, keys: String) -> some View {
+        let selected = settings.mode == mode
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        return Button { pick(mode) } label: {
+            HStack(spacing: 10) {
+                iconTile(mode.symbol, selected: selected)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(mode.label).font(.system(size: 13, weight: .semibold)).foregroundStyle(selected ? Tokens.accentText : Tokens.label)
+                    Text(mode.summary).font(.system(size: 11)).foregroundStyle(Tokens.labelTertiary).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .background(selected ? Tokens.accent.opacity(0.10) : Tokens.chip, in: shape)
+            .overlay(shape.strokeBorder(selected ? Tokens.accent : Tokens.stroke, lineWidth: selected ? 1.5 : 0.5))
+            .overlay(alignment: .topTrailing) { keyChip(keys).padding(8) }
+            .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// The choice shows as selected for a moment, then the panel collapses.
+    private func pick(_ mode: DictationMode) {
+        settings.mode = mode
+        panels.collapseSoon()
+    }
+
+    private var actionsPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            eyebrow("This take")
+            HStack(spacing: 8) {
+                actionTile("Insert now", symbol: "arrow.right.to.line", keys: settings.hotkeyBindings.returnCommits || controller.isLatched ? "↩" : nil, spoken: "Return") {
+                    panels.open = nil
+                    controller.stopAndInsert()
+                }
+                actionTile("Copy instead", symbol: "doc.on.doc", keys: "⌘C", spoken: "Command C") {
+                    panels.open = nil
+                    controller.stopAndCopy()
+                }
+                // The only red on the card.
+                actionTile("Cancel take", symbol: "xmark", keys: "esc", spoken: "Escape, twice", destructive: true) { controller.cancel() }
+            }
+            .padding(.horizontal, 12)
+        }
+        .padding(.bottom, 4)
+    }
+
+    private func actionTile(_ title: String, symbol: String, keys: String?, spoken: String, destructive: Bool = false, action: @escaping () -> Void) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        return Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                iconTile(symbol, destructive: destructive)
+                Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(destructive ? Tokens.recording : Tokens.label).lineLimit(1)
+            }
+            .padding(11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(destructive ? Tokens.recordingSoft : Tokens.chip, in: shape)
+            .overlay { if !destructive { shape.strokeBorder(Tokens.stroke, lineWidth: 0.5) } }
+            .overlay(alignment: .topTrailing) { if let keys { keyChip(keys, destructive: destructive).padding(8) } }
+            .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityHint(keys == nil ? "" : "Shortcut: \(spoken)")
     }
 
     private var dismissButton: some View {
@@ -266,21 +410,6 @@ struct OverlayView: View {
         Text(text).font(.system(size: 10)).foregroundStyle(Tokens.labelSecondary)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .chipSurface(cornerRadius: 6)
-    }
-}
-
-/// The foot of the overlay's mode menu: the cleanup style, changed without leaving the take.
-private struct CleanupStylePicker: View {
-    let settings: SettingsStore
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text("Style").font(.system(size: 12)).foregroundStyle(Tokens.labelSecondary)
-            SegmentedPicker(
-                options: [CleanupPreset.lightTouch, .polished, .notes].map { ($0, $0.name) },
-                selection: bind(settings, \.cleanupPreset), height: 22)
-                .frame(width: 230)
-        }
     }
 }
 

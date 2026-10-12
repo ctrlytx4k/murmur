@@ -17,7 +17,7 @@ public nonisolated enum DictationMode: String, CaseIterable, Codable, Sendable {
     public var summary: String {
         switch self {
         case .raw: "Exactly what you said"
-        case .cleaned: "Fixes fillers, punctuation and casing"
+        case .cleaned: "Fixes fillers, punctuation, casing"
         case .command: "Say an edit for the selected text"
         }
     }

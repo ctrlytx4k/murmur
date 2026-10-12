@@ -6,7 +6,7 @@ import os
 nonisolated struct TapConfig: Sendable {
     var bindings: HotkeyBindings?
     var recording = false
-    var overlayMenuOpen = false
+    var actionsOpen = false
     var dictationDown = false
     /// Double-tap tracking, in event-timestamp nanoseconds. Zero means "nothing pending".
     var tapDownAt: UInt64 = 0
@@ -54,11 +54,11 @@ nonisolated enum HotkeyDecision {
             if config.recording {
                 if keyCode == UInt16(kVK_Escape) { return (.event(.cancel), true) }
                 if bindings.returnCommits, keyCode == UInt16(kVK_Return), modifiers == 0 { return (.event(.commit), true) }
-                // The keys shown in the overlay's menus. Only taken during a take, so they stay free otherwise.
+                // The keys shown on the overlay's panels. Only taken during a take, so they stay free otherwise.
                 if modifiers == 0x8_0000, !autorepeat, let index = [UInt16(kVK_ANSI_1), UInt16(kVK_ANSI_2)].firstIndex(of: keyCode) {
                     return (.action(.selectMode(index)), true)
                 }
-                if config.overlayMenuOpen, modifiers == 0x10_0000, keyCode == UInt16(kVK_ANSI_C) { return (.event(.copy), true) }
+                if config.actionsOpen, modifiers == 0x10_0000, keyCode == UInt16(kVK_ANSI_C) { return (.event(.copy), true) }
             }
             if !dictation.isModifierOnly, keyCode == dictation.keyCode, modifiers == dictation.modifiers {
                 if autorepeat || config.dictationDown { return (nil, true) }
@@ -236,8 +236,8 @@ public final class LiveHotkeyService: HotkeyService {
         shared?.config.withLock { $0.recording = recording }
     }
 
-    public func setOverlayMenuOpen(_ open: Bool) {
-        shared?.config.withLock { $0.overlayMenuOpen = open }
+    public func setActionsOpen(_ open: Bool) {
+        shared?.config.withLock { $0.actionsOpen = open }
     }
 
     public func stop() {

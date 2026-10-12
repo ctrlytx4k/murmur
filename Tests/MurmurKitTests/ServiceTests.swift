@@ -95,10 +95,10 @@ import Testing
         #expect(HotkeyDecision.decide(type: .keyDown, keyCode: 18, flags: option, autorepeat: false, config: &recording).output == .action(.selectMode(0)))
         #expect(HotkeyDecision.decide(type: .keyDown, keyCode: 19, flags: option, autorepeat: false, config: &recording).output == .action(.selectMode(1)))
 
-        // ⌘C stays the front app's Copy unless the overlay's menu is open.
+        // ⌘C stays the front app's Copy unless the overlay is showing its actions.
         let passed = HotkeyDecision.decide(type: .keyDown, keyCode: 8, flags: command, autorepeat: false, config: &recording)
         #expect(passed.output == nil && !passed.swallow)
-        recording.overlayMenuOpen = true
+        recording.actionsOpen = true
         let copied = HotkeyDecision.decide(type: .keyDown, keyCode: 8, flags: command, autorepeat: false, config: &recording)
         #expect(copied.output == .event(.copy) && copied.swallow)
     }

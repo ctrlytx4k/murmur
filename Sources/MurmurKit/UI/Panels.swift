@@ -97,17 +97,20 @@ final class OverlayController {
     private let panel = FloatingPanel(level: .statusBar, allowsKey: false)
     private let controller: DictationController
     private let settings: SettingsStore
+    private let panels: OverlayPanelState
     private var position: SettingsStore.OverlayPosition?
 
     init(stores: Stores, actions: AppActions) {
         self.controller = stores.controller
         self.settings = stores.settings
+        self.panels = stores.overlay
         let view = OverlayView(stores: stores).environment(\.appActions, actions)
         observeChanges { [weak self] in self?.pin(view) }
         observeChanges { [weak self] in self?.update() }
     }
 
-    /// The card grows away from the screen edge it sits against, so it is pinned to that edge of the canvas.
+    /// The window is a fixed canvas and the card is pinned to one edge of it. At the bottom of the screen the
+    /// bottom edge stays put and an open panel grows the card upward, clear of the Dock; at the top it grows down.
     private func pin(_ view: some View) {
         let position = settings.overlayPosition
         guard position != self.position else { return }
@@ -118,10 +121,10 @@ final class OverlayController {
     }
 
     /// Wide enough for the 400 pt card and tall enough for the tallest state, plus shadow room.
-    private static let canvas = CGSize(width: 448, height: 300)
+    private static let canvas = CGSize(width: 448, height: 380)
 
     private func update() {
-        if !controller.state.isRecording { GlassMenuPresenter.shared.takeEnded() }
+        if !controller.state.isRecording, panels.open != nil { panels.open = nil }
         if controller.state == .idle { panel.fadeOut() } else { panel.fadeIn() }
     }
 

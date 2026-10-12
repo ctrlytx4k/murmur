@@ -54,8 +54,8 @@ struct GlassMenuItem: Identifiable {
 
 // MARK: panel
 
-/// The window a glass menu lives in. It never becomes key and never activates Murmur, so the app
-/// being dictated into keeps the keyboard; keys reach an open menu through a monitor instead.
+/// The window a glass menu lives in. It never becomes key, so it cannot close the dropdown under it
+/// or pull focus from a Settings field; keys reach an open menu through a monitor instead.
 final class GlassMenuPanel: NSPanel {
     /// Room around the menu for its shadow.
     static let margin: CGFloat = 30
@@ -65,7 +65,7 @@ final class GlassMenuPanel: NSPanel {
 
     init() {
         super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
-        // Above the overlay and above the menu bar dropdown, whichever opened it.
+        // Above the menu bar dropdown, which can open one.
         level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)
         isOpaque = false
         backgroundColor = .clear
@@ -111,17 +111,13 @@ final class GlassMenuPresenter {
     @ObservationIgnored fileprivate var frames: [UUID: CGRect] = [:]
     @ObservationIgnored private var monitors: [Any] = []
     @ObservationIgnored private var activation: NSObjectProtocol?
-    @ObservationIgnored private var endsWithTake = false
     @ObservationIgnored private var lastClosed: (id: String, at: Date)?
 
     var isOpen: Bool { openID != nil }
-    /// True while a menu opened from the overlay is showing. ⌘C then means "Copy instead".
-    var isOverlayMenuOpen: Bool { openID != nil && endsWithTake }
 
     /// Opens the menu under `anchor`, or closes it if that trigger's menu is already open.
-    /// `keyboard` is for menus opened from Murmur's own windows; an overlay menu is mouse only,
-    /// because the keyboard belongs to the app being dictated into.
-    func toggle(id: String, anchor: NSView?, keyboard: Bool, endsWithTake: Bool = false, maxHeight: CGFloat = 420, items: [GlassMenuItem]) {
+    /// There is one presenter and one panel for the whole app, so opening any menu closes whichever was open.
+    func toggle(id: String, anchor: NSView?, maxHeight: CGFloat = 420, items: [GlassMenuItem]) {
         if openID == id { return close() }
         // The click that closed this trigger's menu also lands on the trigger. That is a close, not a reopen.
         if let lastClosed, lastClosed.id == id, Date().timeIntervalSince(lastClosed.at) < 0.3 { return }
@@ -131,7 +127,6 @@ final class GlassMenuPresenter {
         let area = (window.screen ?? NSScreen.main)?.visibleFrame ?? .zero
 
         self.items = items
-        self.endsWithTake = endsWithTake
         frames = [:]
         hovered = nil
         focused = nil
@@ -173,7 +168,8 @@ final class GlassMenuPresenter {
             }
             return event
         }) { monitors.append(monitor) }
-        if keyboard, let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+        // Keys headed for Murmur's own windows drive the menu and go no further.
+        if let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
             MainActor.assumeIsolated { self?.keyDown(event) ?? false } ? nil : event
         }) { monitors.append(monitor) }
         activation = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
@@ -194,18 +190,6 @@ final class GlassMenuPresenter {
         items = []
         hovered = nil
         focused = nil
-    }
-
-    /// The take stopped or was cancelled: a menu opened from the overlay goes with it.
-    func takeEnded() {
-        if endsWithTake { close() }
-    }
-
-    /// Esc while recording closes an overlay menu instead of cancelling the take. Returns whether it did.
-    func closeOverlayMenu() -> Bool {
-        guard isOpen, endsWithTake else { return false }
-        close()
-        return true
     }
 
     fileprivate func activate(_ item: GlassMenuItem) {
@@ -438,9 +422,6 @@ private struct GlassMenuAnchorReader: NSViewRepresentable {
 
 /// Any control that opens a glass menu. The label is told whether its menu is open, to draw itself as pressed.
 struct GlassMenuButton<Label: View>: View {
-    /// Menus opened from Murmur's windows take arrow keys; overlay menus are mouse only.
-    var keyboard = true
-    var endsWithTake = false
     var maxHeight: CGFloat = 420
     let items: () -> [GlassMenuItem]
     @ViewBuilder let label: (_ isOpen: Bool) -> Label
@@ -450,7 +431,7 @@ struct GlassMenuButton<Label: View>: View {
 
     var body: some View {
         Button {
-            GlassMenuPresenter.shared.toggle(id: id, anchor: anchor.view, keyboard: keyboard, endsWithTake: endsWithTake, maxHeight: maxHeight, items: items())
+            GlassMenuPresenter.shared.toggle(id: id, anchor: anchor.view, maxHeight: maxHeight, items: items())
         } label: {
             label(GlassMenuPresenter.shared.openID == id)
         }

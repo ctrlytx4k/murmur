@@ -19,7 +19,7 @@ public nonisolated enum HotkeyEvent: Sendable {
     case cancel
     /// Return while recording in toggle mode: stop and insert.
     case commit
-    /// ⌘C while the overlay's menu is open: stop and copy instead of inserting.
+    /// ⌘C while the overlay shows its actions: stop and copy instead of inserting.
     case copy
 }
 
@@ -55,8 +55,8 @@ public protocol HotkeyService: AnyObject {
     func update(bindings: HotkeyBindings)
     /// While recording, Esc cancels and (in toggle mode) Return commits.
     func setRecording(_ recording: Bool)
-    /// While the overlay's menu is open, ⌘C copies the take instead of inserting it.
-    func setOverlayMenuOpen(_ open: Bool)
+    /// While the overlay shows its actions, ⌘C copies the take instead of inserting it.
+    func setActionsOpen(_ open: Bool)
     func stop()
 }
 
