@@ -3,6 +3,7 @@ import SwiftUI
 enum SettingsPane: String, CaseIterable, Identifiable {
     case general = "General"
     case hotkeys = "Hotkeys"
+    case overlay = "Overlay"
     case voiceEngine = "Voice Engine"
     case cleanup = "AI Cleanup"
     case dictionary = "Dictionary & Snippets"
@@ -14,6 +15,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .general: "gearshape"
         case .hotkeys: "keyboard"
+        case .overlay: "rectangle.bottomthird.inset.filled"
         case .voiceEngine: "waveform"
         case .cleanup: "text.badge.checkmark"
         case .dictionary: "character.book.closed"
@@ -59,7 +61,17 @@ struct SettingsView: View {
                     HStack(spacing: 10) {
                         Text(navigation.pane.rawValue).font(.mmPaneTitle)
                         Spacer()
-                        if navigation.pane == .cleanup, stores.providers.selected.isCloud {
+                        if navigation.pane == .overlay {
+                            // Resets this pane only.
+                            Button { settings.overlay = OverlayAppearance() } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.counterclockwise").font(.system(size: 10.5, weight: .semibold))
+                                    Text("Reset to Defaults")
+                                }
+                            }
+                            .buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5))
+                            .disabled(settings.overlay == OverlayAppearance())
+                        } else if navigation.pane == .cleanup, stores.providers.selected.isCloud {
                             // Says so in the pane's title whenever cleanup text leaves this Mac.
                             PlaceBadge(isLocal: false, cloudText: "Using a cloud provider", height: 24)
                         } else if let note = navigation.pane.note {
@@ -73,6 +85,7 @@ struct SettingsView: View {
                             switch navigation.pane {
                             case .general: GeneralPane(stores: stores)
                             case .hotkeys: HotkeysPane(settings: settings)
+                            case .overlay: OverlayPane(stores: stores)
                             case .voiceEngine: VoiceEnginePane(stores: stores)
                             case .cleanup: CleanupPane(stores: stores, providerStatus: cleanupStatus)
                             case .privacy: PrivacyPane(stores: stores)
@@ -195,12 +208,6 @@ private struct GeneralPane: View {
                         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension")!)
                     }],
                     disabled: microphones.disconnected, selectedAccessory: AnyView(ActiveMicMeter(controller: stores.controller)))
-            }
-            SettingsRow(title: "Overlay position", subtitle: "Where the card appears while you dictate") {
-                GlassPopUpButton(
-                    label: "Overlay position", options: SettingsStore.OverlayPosition.allCases.map { ($0, $0.rawValue) },
-                    selection: bind(settings, \.overlayPosition),
-                    details: Dictionary(uniqueKeysWithValues: SettingsStore.OverlayPosition.allCases.map { ($0, $0.detail) }))
             }
         }
 

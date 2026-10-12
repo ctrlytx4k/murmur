@@ -90,6 +90,52 @@ struct ThresholdSlider: View {
     }
 }
 
+/// A thin track with a round thumb, for a value in a range. Arrow keys move it when it has focus,
+/// and VoiceOver reads `valueText`.
+struct MurmurSlider: View {
+    let label: String
+    @Binding var value: Double
+    var range: ClosedRange<Double> = 0...1
+    var step: Double = 0.01
+    var width: CGFloat = 200
+    let valueText: String
+    @Environment(\.isEnabled) private var isEnabled
+
+    private var span: Double { range.upperBound - range.lowerBound }
+
+    var body: some View {
+        GeometryReader { geo in
+            let thumb: CGFloat = 20
+            let x = (geo.size.width - thumb) * CGFloat((min(max(value, range.lowerBound), range.upperBound) - range.lowerBound) / span)
+            ZStack(alignment: .leading) {
+                Pill().fill(Tokens.controlStrong).frame(height: 4)
+                Pill().fill(Tokens.accent).frame(width: x + thumb / 2, height: 4)
+                Circle().fill(LinearGradient(colors: [.white, Color(red: 0.93, green: 0.94, blue: 0.96)], startPoint: .top, endPoint: .bottom))
+                    .frame(width: thumb, height: thumb)
+                    .shadow(color: .black.opacity(0.3), radius: 1.5, y: 1)
+                    .offset(x: x)
+            }
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
+                set(range.lowerBound + span * Double(min(max((drag.location.x - thumb / 2) / (geo.size.width - thumb), 0), 1)))
+            })
+        }
+        .frame(width: width, height: 20)
+        .focusable(isEnabled)
+        .onKeyPress(.leftArrow) { set(value - max(step, span / 20)); return .handled }
+        .onKeyPress(.rightArrow) { set(value + max(step, span / 20)); return .handled }
+        .accessibilityRepresentation {
+            Slider(value: $value, in: range, step: step) { Text(label) }.accessibilityValue(valueText)
+        }
+    }
+
+    private func set(_ raw: Double) {
+        let snapped = (raw / step).rounded() * step
+        value = min(max(snapped, range.lowerBound), range.upperBound)
+    }
+}
+
 struct ModeTag: View {
     let mode: DictationMode
     var body: some View {
