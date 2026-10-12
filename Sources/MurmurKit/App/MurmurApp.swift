@@ -195,6 +195,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             try? hotkeys.start(bindings: bindings)
         }
         hotkeys.setRecording(controller.state.isRecording)
+        hotkeys.setOverlayMenuOpen(GlassMenuPresenter.shared.isOverlayMenuOpen)
 
         let state = controller.state
         if settings.soundsEnabled, state != lastSoundState {
@@ -275,6 +276,8 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         case .cycleMode: settings.mode = settings.mode.next
         case .reinsertLast: controller.reinsertLast()
         case .openHistory: showHistory()
+        case .selectMode(let index):
+            if DictationMode.offered.indices.contains(index) { settings.mode = DictationMode.offered[index] }
         }
     }
 

@@ -24,7 +24,7 @@ struct VoiceEnginePane: View {
 
         SettingsGroup(title: "Processing") {
             SettingsRow(title: "Language", subtitle: "The language you dictate in", showsDivider: false) {
-                GlassPopUpButton(label: "Language", options: SettingsStore.languages.map { ($0, $0) }, selection: bind(settings, \.language))
+                GlassPopUpButton(label: "Language", options: SettingsStore.languages.map { ($0, $0) }, selection: bind(settings, \.language), maxHeight: 256)
             }
             SettingsRow(title: "Model storage", subtitle: "~/Library/Application Support/Murmur/Models") {
                 Button("Show in Finder") {

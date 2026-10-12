@@ -71,6 +71,13 @@ enum Snapshots {
             .separator,
             GlassMenuItem(title: "Sound settings…", isAccent: true),
         ]))
+        add("menu-language-scrolling", GlassMenu(items: SettingsStore.languages.map { GlassMenuItem(title: $0, isSelected: $0 == "English") }, maxHeight: 256))
+        add("menu-microphone-disconnected", GlassMenu(items: [
+            .header("Input"),
+            GlassMenuItem(title: "System Default", detail: "Follows System Settings · MacBook Pro Microphone"),
+            GlassMenuItem(title: "MacBook Pro Microphone", detail: "Built-in"),
+            GlassMenuItem(title: "USB mic", detail: "Not connected · using default", isSelected: true, isDisabled: true),
+        ]))
         add("menu-plain", GlassMenu(items: SettingsStore.Retention.allCases.map { GlassMenuItem(title: $0.rawValue, isSelected: $0 == .month) }))
         st = make(recording)
         add("dropdown-recording", DropdownView(stores: st))

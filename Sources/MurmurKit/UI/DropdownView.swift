@@ -49,7 +49,7 @@ struct DropdownView: View {
         switch controller.state {
         case .recording: (Tokens.recording, "Listening…", settings.mode.label, true)
         case .processing: (Tokens.accent, "Transcribing…", modelName, false)
-        case .inserted(let summary): (Tokens.success, "Inserted", "\(summary.wordCount) words into \(summary.appName)", false)
+        case .inserted(let summary): (Tokens.success, summary.copied ? "Copied" : "Inserted", summary.copied ? "\(summary.wordCount) words on the clipboard" : "\(summary.wordCount) words into \(summary.appName)", false)
         case .error(let error): (error.isWarning ? Tokens.warning : Tokens.recording, "Needs attention", error.title, false)
         case .idle:
             if let first = missing.first {
@@ -206,7 +206,7 @@ struct DropdownView: View {
             .accessibilityValue(expanded == .model ? "Expanded" : "Collapsed")
             if expanded == .model { modelList }
 
-            GlassMenuButton(items: {
+            GlassMenuButton(maxHeight: 256, items: {
                 SettingsStore.languages.map { language in
                     GlassMenuItem(title: language, isSelected: settings.language == language) { settings.language = language }
                 }
@@ -245,7 +245,10 @@ struct DropdownView: View {
             .padding(EdgeInsets(top: 2, leading: 18, bottom: 6, trailing: 8))
     }
 
-    private func choice(_ title: String, detail: String? = nil, selected: Bool = false, monospaced: Bool = false, accent: Bool = false, action: @escaping () -> Void) -> some View {
+    private func choice(
+        _ title: String, detail: String? = nil, selected: Bool = false, monospaced: Bool = false, accent: Bool = false, disabled: Bool = false,
+        @ViewBuilder accessory: () -> some View = { EmptyView() }, action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             HStack(spacing: 9) {
                 Circle().fill(selected ? Tokens.accent : .clear).frame(width: 6, height: 6)
@@ -257,12 +260,15 @@ struct DropdownView: View {
                 }
                 .lineLimit(1)
                 Spacer(minLength: 0)
+                accessory()
             }
             .padding(.horizontal, 9)
             .frame(height: detail == nil ? 30 : 42)
             .background(selected ? Tokens.accent.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(HoverRowStyle())
+        .opacity(disabled ? 0.42 : 1)
+        .disabled(disabled)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -286,10 +292,13 @@ struct DropdownView: View {
     }
 
     private var microphoneList: some View {
-        let microphones = AudioDevices.menuOptions()
+        let microphones = AudioDevices.menuOptions(saved: settings.microphoneID, savedName: settings.microphoneName)
         return accordion {
             ForEach(microphones.options, id: \.value) { option in
-                choice(option.label, detail: microphones.details[option.value], selected: settings.microphoneID == option.value) {
+                let selected = settings.microphoneID == option.value
+                choice(option.label, detail: microphones.details[option.value], selected: selected, disabled: microphones.disconnected.contains(option.value)) {
+                    if selected { ActiveMicMeter(controller: controller) }
+                } action: {
                     settings.microphoneID = option.value
                 }
             }

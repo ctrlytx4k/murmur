@@ -87,6 +87,22 @@ import Testing
         #expect(HotkeyDecision.decide(type: .keyDown, keyCode: 36, flags: 0, autorepeat: false, config: &pushToTalk).output == nil)
     }
 
+    @Test func menuKeysOnlyActDuringATake() {
+        // ⌥1 and ⌥2 pick a mode while recording, and are ordinary keys the rest of the time.
+        var idle = config()
+        #expect(HotkeyDecision.decide(type: .keyDown, keyCode: 18, flags: option, autorepeat: false, config: &idle).swallow == false)
+        var recording = config(recording: true)
+        #expect(HotkeyDecision.decide(type: .keyDown, keyCode: 18, flags: option, autorepeat: false, config: &recording).output == .action(.selectMode(0)))
+        #expect(HotkeyDecision.decide(type: .keyDown, keyCode: 19, flags: option, autorepeat: false, config: &recording).output == .action(.selectMode(1)))
+
+        // ⌘C stays the front app's Copy unless the overlay's menu is open.
+        let passed = HotkeyDecision.decide(type: .keyDown, keyCode: 8, flags: command, autorepeat: false, config: &recording)
+        #expect(passed.output == nil && !passed.swallow)
+        recording.overlayMenuOpen = true
+        let copied = HotkeyDecision.decide(type: .keyDown, keyCode: 8, flags: command, autorepeat: false, config: &recording)
+        #expect(copied.output == .event(.copy) && copied.swallow)
+    }
+
     @Test func otherShortcutsFireOnce() {
         var c = config()
         #expect(HotkeyDecision.decide(type: .keyDown, keyCode: 46, flags: option, autorepeat: false, config: &c).output == .action(.cycleMode))

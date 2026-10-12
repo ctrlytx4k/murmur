@@ -114,13 +114,15 @@ struct OverlayView: View {
         HStack(spacing: 10) {
             Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Tokens.success)
                 .frame(width: 30, height: 30).background(Tokens.successSoft, in: Circle())
-            Text("Inserted into \(summary.appName)").font(.system(size: 13.5, weight: .semibold))
+            Text(summary.copied ? "Copied to the clipboard" : "Inserted into \(summary.appName)").font(.system(size: 13.5, weight: .semibold))
             Text("\(summary.wordCount) \(summary.wordCount == 1 ? "word" : "words")").font(.mmCallout).foregroundStyle(Tokens.labelTertiary)
-            HStack(spacing: 4) {
-                hintKey("⌘Z")
-                Text("undo").font(.system(size: 10.5)).foregroundStyle(Tokens.labelTertiary)
+            if !summary.copied {
+                HStack(spacing: 4) {
+                    hintKey("⌘Z")
+                    Text("undo").font(.system(size: 10.5)).foregroundStyle(Tokens.labelTertiary)
+                }
+                .padding(.leading, 4)
             }
-            .padding(.leading, 4)
         }
         .padding(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 16))
         .frame(height: 46)
@@ -211,8 +213,8 @@ struct OverlayView: View {
     }
 
     private var modeItems: [GlassMenuItem] {
-        var items = DictationMode.offered.map { mode in
-            GlassMenuItem(title: mode.label, detail: mode.summary, symbol: mode.symbol, isSelected: settings.mode == mode) { settings.mode = mode }
+        var items = DictationMode.offered.enumerated().map { index, mode in
+            GlassMenuItem(title: mode.label, detail: mode.summary, symbol: mode.symbol, keys: "⌥\(index + 1)", isSelected: settings.mode == mode) { settings.mode = mode }
         }
         if settings.cleanupEnabled {
             items += [.separator, .custom(CleanupStylePicker(settings: settings))]
@@ -224,7 +226,7 @@ struct OverlayView: View {
         GlassMenuButton(keyboard: false, endsWithTake: true, items: {
             [
                 GlassMenuItem(title: "Insert now", keys: settings.hotkeyBindings.returnCommits || controller.isLatched ? "↩" : nil) { controller.stopAndInsert() },
-                GlassMenuItem(title: "Open Settings…") { actions.openSettings(nil) },
+                GlassMenuItem(title: "Copy instead", keys: "⌘C") { controller.stopAndCopy() },
                 .separator,
                 GlassMenuItem(title: "Cancel take", keys: "esc", isDestructive: true) { controller.cancel() },
             ]

@@ -19,9 +19,15 @@ public nonisolated enum HotkeyEvent: Sendable {
     case cancel
     /// Return while recording in toggle mode: stop and insert.
     case commit
+    /// ⌘C while the overlay's menu is open: stop and copy instead of inserting.
+    case copy
 }
 
-public nonisolated enum HotkeyAction: Sendable { case cycleMode, reinsertLast, openHistory }
+public nonisolated enum HotkeyAction: Equatable, Sendable {
+    case cycleMode, reinsertLast, openHistory
+    /// ⌥1, ⌥2 while recording: the mode at that position in the overlay's menu.
+    case selectMode(Int)
+}
 
 public nonisolated struct HotkeyBindings: Equatable, Sendable {
     public var dictation: Shortcut
@@ -49,6 +55,8 @@ public protocol HotkeyService: AnyObject {
     func update(bindings: HotkeyBindings)
     /// While recording, Esc cancels and (in toggle mode) Return commits.
     func setRecording(_ recording: Bool)
+    /// While the overlay's menu is open, ⌘C copies the take instead of inserting it.
+    func setOverlayMenuOpen(_ open: Bool)
     func stop()
 }
 

@@ -30,6 +30,8 @@ struct GlassMenuItem: Identifiable {
     /// Title in the accent color, for a row that leads somewhere ("Manage models…").
     var isAccent = false
     var isMonospaced = false
+    /// A small live view at the trailing edge, such as an input level meter.
+    var accessory: AnyView?
     var action: () -> Void = {}
 
     static var separator: GlassMenuItem { GlassMenuItem(kind: .separator) }
@@ -38,6 +40,16 @@ struct GlassMenuItem: Identifiable {
 
     var isRow: Bool { if case .row = kind { true } else { false } }
     var isTall: Bool { detail != nil || symbol != nil }
+
+    /// Height in the menu, to know when a long menu has to scroll.
+    var height: CGFloat {
+        switch kind {
+        case .row: isTall ? 48 : 32
+        case .separator: 11
+        case .header: 25
+        case .custom: 36
+        }
+    }
 }
 
 // MARK: panel
@@ -103,11 +115,13 @@ final class GlassMenuPresenter {
     @ObservationIgnored private var lastClosed: (id: String, at: Date)?
 
     var isOpen: Bool { openID != nil }
+    /// True while a menu opened from the overlay is showing. ⌘C then means "Copy instead".
+    var isOverlayMenuOpen: Bool { openID != nil && endsWithTake }
 
     /// Opens the menu under `anchor`, or closes it if that trigger's menu is already open.
     /// `keyboard` is for menus opened from Murmur's own windows; an overlay menu is mouse only,
     /// because the keyboard belongs to the app being dictated into.
-    func toggle(id: String, anchor: NSView?, keyboard: Bool, endsWithTake: Bool = false, items: [GlassMenuItem]) {
+    func toggle(id: String, anchor: NSView?, keyboard: Bool, endsWithTake: Bool = false, maxHeight: CGFloat = 420, items: [GlassMenuItem]) {
         if openID == id { return close() }
         // The click that closed this trigger's menu also lands on the trigger. That is a close, not a reopen.
         if let lastClosed, lastClosed.id == id, Date().timeIntervalSince(lastClosed.at) < 0.3 { return }
@@ -124,7 +138,8 @@ final class GlassMenuPresenter {
 
         // Measure first, to know whether it fits below the trigger.
         let margin = GlassMenuPanel.margin
-        let measured = NSHostingView(rootView: GlassMenu(items: items, opensUpward: false, presenter: self)).fittingSize
+        let maxHeight = min(maxHeight, area.height - 24)
+        let measured = NSHostingView(rootView: GlassMenu(items: items, maxHeight: maxHeight, opensUpward: false, presenter: self)).fittingSize
         let size = CGSize(width: measured.width - 2 * margin, height: measured.height - 2 * margin)
         let opensUpward = trigger.minY - 6 - size.height < area.minY && trigger.maxY + 6 + size.height <= area.maxY
         var x = trigger.maxX - size.width
@@ -136,7 +151,7 @@ final class GlassMenuPresenter {
         self.panel = panel
         let tracking = GlassMenuTrackingView()
         tracking.onMove = { [weak self] point in self?.pointerMoved(to: point) }
-        let host = NSHostingView(rootView: GlassMenu(items: items, opensUpward: opensUpward, presenter: self))
+        let host = NSHostingView(rootView: GlassMenu(items: items, maxHeight: maxHeight, opensUpward: opensUpward, presenter: self))
         host.frame = NSRect(origin: .zero, size: measured)
         host.autoresizingMask = [.width, .height]
         host.setAccessibilityRole(.menu)
@@ -200,7 +215,8 @@ final class GlassMenuPresenter {
     }
 
     private func pointerMoved(to point: CGPoint?) {
-        let row = point.flatMap { point in items.first { $0.isRow && !$0.isDisabled && frames[$0.id]?.contains(point) == true }?.id }
+        let visible = panel?.contentView?.bounds.insetBy(dx: GlassMenuPanel.margin + 6, dy: GlassMenuPanel.margin + 6)
+        let row = point.flatMap { point in visible?.contains(point) == false ? nil : items.first { $0.isRow && !$0.isDisabled && frames[$0.id]?.contains(point) == true }?.id }
         if row != hovered { hovered = row }
         // Once the pointer is in charge, the keyboard ring goes away.
         if row != nil, focused != nil { focused = nil }
@@ -240,6 +256,8 @@ private struct GlassMenuRowFrames: PreferenceKey {
 /// The menu itself: rows on glass, one step more opaque than the overlay card so it reads as on top.
 struct GlassMenu: View {
     let items: [GlassMenuItem]
+    /// A menu taller than this scrolls.
+    var maxHeight: CGFloat = 420
     var opensUpward = false
     var presenter: GlassMenuPresenter?
 
@@ -249,7 +267,38 @@ struct GlassMenu: View {
 
     private var shown: Bool { appeared || flatGlass }
 
+    private var scrolls: Bool { items.reduce(0) { $0 + $1.height + 1 } > maxHeight }
+
     var body: some View {
+        Group {
+            if scrolls {
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical) { rows }
+                        .frame(height: maxHeight - 12)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .onChange(of: presenter?.focused) { _, row in
+                            if let row { proxy.scrollTo(row) }
+                        }
+                }
+            } else {
+                rows
+            }
+        }
+        .padding(6)
+        .modifier(GlassMenuSurface())
+        .scaleEffect(shown || reduceMotion ? 1 : 0.96, anchor: opensUpward ? .bottomTrailing : .topTrailing)
+        .opacity(shown ? 1 : 0)
+        .padding(GlassMenuPanel.margin)
+        .coordinateSpace(name: "glass-menu")
+        .onPreferenceChange(GlassMenuRowFrames.self) { frames in presenter?.frames = frames }
+        .foregroundStyle(Tokens.label)
+        .onAppear { withAnimation(.easeOut(duration: 0.16)) { appeared = true } }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Menu")
+    }
+
+    private var rows: some View {
         VStack(alignment: .leading, spacing: 1) {
             ForEach(items) { item in
                 switch item.kind {
@@ -258,6 +307,7 @@ struct GlassMenu: View {
                         .background(GeometryReader { geo in
                             Color.clear.preference(key: GlassMenuRowFrames.self, value: [item.id: geo.frame(in: .named("glass-menu"))])
                         })
+                        .id(item.id)
                 case .separator:
                     Rectangle().fill(Tokens.separator).frame(height: 1).padding(.horizontal, 12).padding(.vertical, 5)
                         .accessibilityHidden(true)
@@ -273,17 +323,6 @@ struct GlassMenu: View {
         }
         .frame(minWidth: 190)
         .fixedSize()
-        .padding(6)
-        .modifier(GlassMenuSurface())
-        .scaleEffect(shown || reduceMotion ? 1 : 0.96, anchor: opensUpward ? .bottomTrailing : .topTrailing)
-        .opacity(shown ? 1 : 0)
-        .padding(GlassMenuPanel.margin)
-        .coordinateSpace(name: "glass-menu")
-        .onPreferenceChange(GlassMenuRowFrames.self) { frames in presenter?.frames = frames }
-        .foregroundStyle(Tokens.label)
-        .onAppear { withAnimation(.easeOut(duration: 0.16)) { appeared = true } }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Menu")
     }
 }
 
@@ -347,6 +386,7 @@ private struct GlassMenuRow: View {
                 if item.isDisabled, let reason = item.disabledReason {
                     Text(reason).font(.system(size: 11)).foregroundStyle(Tokens.labelTertiary)
                 }
+                if let accessory = item.accessory { accessory }
                 if let keys = item.keys {
                     Text(keys).font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(item.isDestructive ? Tokens.recording : Tokens.labelSecondary)
@@ -401,6 +441,7 @@ struct GlassMenuButton<Label: View>: View {
     /// Menus opened from Murmur's windows take arrow keys; overlay menus are mouse only.
     var keyboard = true
     var endsWithTake = false
+    var maxHeight: CGFloat = 420
     let items: () -> [GlassMenuItem]
     @ViewBuilder let label: (_ isOpen: Bool) -> Label
 
@@ -409,7 +450,7 @@ struct GlassMenuButton<Label: View>: View {
 
     var body: some View {
         Button {
-            GlassMenuPresenter.shared.toggle(id: id, anchor: anchor.view, keyboard: keyboard, endsWithTake: endsWithTake, items: items())
+            GlassMenuPresenter.shared.toggle(id: id, anchor: anchor.view, keyboard: keyboard, endsWithTake: endsWithTake, maxHeight: maxHeight, items: items())
         } label: {
             label(GlassMenuPresenter.shared.openID == id)
         }
@@ -443,9 +484,14 @@ struct GlassPopUpButton<Value: Hashable>: View {
     var header: String?
     /// Extra rows after the choices, such as a link to System Settings.
     var footer: [GlassMenuItem] = []
+    /// Choices that cannot be picked right now.
+    var disabled: Set<Value> = []
+    /// A live view on the chosen row, such as a level meter.
+    var selectedAccessory: AnyView?
+    var maxHeight: CGFloat = 420
 
     var body: some View {
-        GlassMenuButton(items: { items }) { isOpen in
+        GlassMenuButton(maxHeight: maxHeight, items: { items }) { isOpen in
             PopLabel(text: options.first { $0.value == selection }?.label ?? "", height: height, tint: tint, isOpen: isOpen)
         }
         .fixedSize()
@@ -456,7 +502,10 @@ struct GlassPopUpButton<Value: Hashable>: View {
     private var items: [GlassMenuItem] {
         var items = header.map { [GlassMenuItem.header($0)] } ?? []
         items += options.map { option in
-            GlassMenuItem(title: option.label, detail: details[option.value], isSelected: option.value == selection) { selection = option.value }
+            GlassMenuItem(
+                title: option.label, detail: details[option.value], isSelected: option.value == selection,
+                isDisabled: disabled.contains(option.value), accessory: option.value == selection ? selectedAccessory : nil
+            ) { selection = option.value }
         }
         if !footer.isEmpty { items += [.separator] + footer }
         return items

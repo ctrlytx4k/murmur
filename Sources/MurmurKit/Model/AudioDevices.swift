@@ -34,12 +34,26 @@ enum AudioDevices {
         }
     }
 
+    struct MenuOptions {
+        var options: [(value: String?, label: String)]
+        var details: [String?: String]
+        /// The saved microphone, when it is not plugged in. Murmur records from the system default meanwhile.
+        var disconnected: Set<String?>
+    }
+
     /// The microphone choices as menu rows, shared by Settings and the menu bar dropdown.
-    static func menuOptions() -> (options: [(value: String?, label: String)], details: [String?: String]) {
+    static func menuOptions(saved: String?, savedName: String?) -> MenuOptions {
         let devices = inputs()
+        var options: [(value: String?, label: String)] = [(nil, "System Default")] + devices.map { (Optional($0.id), $0.name) }
         var details: [String?: String] = [nil: systemDefaultName.map { "Follows System Settings · \($0)" } ?? "Follows System Settings"]
         for device in devices { details[device.id] = device.connection }
-        return ([(nil, "System Default")] + devices.map { (Optional($0.id), $0.name) }, details)
+        var disconnected: Set<String?> = []
+        if let saved, !devices.contains(where: { $0.id == saved }) {
+            options.append((saved, savedName ?? "Saved microphone"))
+            details[saved] = "Not connected · using default"
+            disconnected.insert(saved)
+        }
+        return MenuOptions(options: options, details: details, disconnected: disconnected)
     }
 
     static var systemDefaultName: String? {

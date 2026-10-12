@@ -182,13 +182,20 @@ private struct GeneralPane: View {
                 subtitle: stores.controller.permissions.microphone ? "System Default follows the input chosen in System Settings" : "Microphone access is off",
                 subtitleColor: stores.controller.permissions.microphone ? Tokens.labelTertiary : Tokens.warning
             ) {
-                let microphones = AudioDevices.menuOptions()
+                let microphones = AudioDevices.menuOptions(saved: settings.microphoneID, savedName: settings.microphoneName)
                 GlassPopUpButton(
                     label: "Microphone", options: microphones.options, selection: bind(settings, \.microphoneID),
                     details: microphones.details, header: "Input",
                     footer: [GlassMenuItem(title: "Sound settings…", isAccent: true) {
                         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension")!)
-                    }])
+                    }],
+                    disabled: microphones.disconnected, selectedAccessory: AnyView(ActiveMicMeter(controller: stores.controller)))
+            }
+            SettingsRow(title: "Overlay position", subtitle: "Where the card appears while you dictate") {
+                GlassPopUpButton(
+                    label: "Overlay position", options: SettingsStore.OverlayPosition.allCases.map { ($0, $0.rawValue) },
+                    selection: bind(settings, \.overlayPosition),
+                    details: Dictionary(uniqueKeysWithValues: SettingsStore.OverlayPosition.allCases.map { ($0, $0.detail) }))
             }
         }
 

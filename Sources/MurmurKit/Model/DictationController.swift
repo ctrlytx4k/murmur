@@ -48,6 +48,8 @@ public final class DictationController {
     @ObservationIgnored private var stateToken = 0
     @ObservationIgnored private var lastReceipt: InsertionReceipt?
     @ObservationIgnored private var lastSoundAt = Date.distantPast
+    /// Set for one take by "Copy instead".
+    @ObservationIgnored private var copiesInstead = false
     /// The in-flight stop/transcribe/insert work. Tests await it.
     @ObservationIgnored public private(set) var pendingWork: Task<Void, Never>?
 
@@ -113,6 +115,7 @@ public final class DictationController {
         case (.down, .toggle): toggle()
         case (.up, .toggle): break
         case (.commit, _): stopAndInsert()
+        case (.copy, _): stopAndCopy()
         case (.toggle, _): toggle()
         }
     }
@@ -154,8 +157,14 @@ public final class DictationController {
         }
     }
 
+    /// Ends the take and puts the text on the clipboard instead of typing it.
+    public func stopAndCopy() {
+        copiesInstead = true
+        stopAndInsert()
+    }
+
     public func stopAndInsert() {
-        guard state.isRecording else { return }
+        guard state.isRecording else { return copiesInstead = false }
         let token = set(.processing)
         pendingWork = Task { await self.finish(token) }
     }
@@ -214,6 +223,8 @@ public final class DictationController {
     // MARK: the take
 
     private func finish(_ token: Int) async {
+        let copies = copiesInstead
+        copiesInstead = false
         let heard: String
         let seconds: Double
         do {
@@ -237,7 +248,7 @@ public final class DictationController {
 
         // A snippet trigger replaces the whole take and skips cleanup.
         if let dictionary, let snippet = TextProcessor.snippet(for: heard, in: dictionary.snippets) {
-            return await insert(TextProcessor.expand(snippet.text, now: now()), token: token, raw: nil, mode: .raw, audioSeconds: seconds)
+            return await deliver(TextProcessor.expand(snippet.text, now: now()), copies: copies, token: token, raw: nil, mode: .raw, audioSeconds: seconds)
         }
         let raw = dictionary.map { TextProcessor.applyDictionary($0.entries, to: heard, app: target?.name) } ?? heard
 
@@ -258,7 +269,23 @@ public final class DictationController {
             guard token == stateToken else { return }
         }
         if settings.mode == .cleaned, text == raw, !(settings.cleanupEnabled && cleanup != nil) { DebugLog.log("cleanup skipped: switched off") }
-        await insert(text, token: token, raw: text == raw ? nil : raw, mode: wasCleaned ? .cleaned : .raw, audioSeconds: seconds)
+        await deliver(text, copies: copies, token: token, raw: text == raw ? nil : raw, mode: wasCleaned ? .cleaned : .raw, audioSeconds: seconds)
+    }
+
+    private func deliver(_ text: String, copies: Bool, token: Int, raw: String?, mode: DictationMode, audioSeconds: Double) async {
+        guard copies else { return await insert(text, token: token, raw: raw, mode: mode, audioSeconds: audioSeconds) }
+        // Nothing is typed, so there is nothing to undo and no password field to worry about.
+        let app = target?.name ?? "the front app"
+        copyToClipboard(text)
+        lastReceipt = nil
+        lastTranscription = Transcription(text: text, date: now(), appName: app, mode: mode)
+        canUndoLast = false
+        history?.add(
+            HistoryEntry(date: now(), appName: app, bundleIdentifier: target?.bundleIdentifier, mode: mode, text: text, raw: raw, audioSeconds: audioSeconds, engine: engine.displayName),
+            retention: settings.retention)
+        guard token == stateToken else { return }
+        let held = set(.inserted(InsertionSummary(appName: app, wordCount: text.split(whereSeparator: \.isWhitespace).count, copied: true)))
+        returnToIdle(after: insertedHold, ifStill: held)
     }
 
     /// The cleanup instructions for a take into this app, or nil when a per-app rule says to leave it raw.
@@ -358,7 +385,7 @@ public final class DictationController {
         case .idle: "idle"
         case .recording: "recording"
         case .processing: "processing"
-        case .inserted(let summary): "inserted (\(summary.wordCount) words)"
+        case .inserted(let summary): "\(summary.copied ? "copied" : "inserted") (\(summary.wordCount) words)"
         case .error(let error): "error: \(error.title)"
         }
     }

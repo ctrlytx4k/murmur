@@ -235,6 +235,24 @@ struct Harness {
         #expect(h.insertion.inserted.isEmpty)
     }
 
+    @Test func copyInsteadPutsTheTextOnTheClipboardAndTypesNothing() async {
+        let h = Harness()
+        h.controller.start()
+        h.controller.stopAndCopy()
+        await h.settle()
+        #expect(h.controller.state == .inserted(InsertionSummary(appName: "Notes", wordCount: 3, copied: true)))
+        #expect(h.copied == ["hello there world"])
+        #expect(h.insertion.inserted.isEmpty)
+        #expect(!h.controller.canUndoLast)
+
+        // The next take inserts as usual.
+        h.controller.cancel()
+        h.controller.start()
+        h.controller.stopAndInsert()
+        await h.settle()
+        #expect(h.insertion.inserted == ["hello there world"])
+    }
+
     @Test func briefEmptyTakeEndsQuietly() async {
         let h = Harness()
         h.engine.result = .success("")

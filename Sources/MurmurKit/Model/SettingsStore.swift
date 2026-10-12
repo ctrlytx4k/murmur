@@ -86,10 +86,10 @@ public nonisolated enum CleanupPreset: String, CaseIterable, Sendable {
 public final class SettingsStore {
     public enum Behavior: String, Sendable { case pushToTalk, toggle }
     public enum Appearance: String, Sendable { case auto, light, dark }
-    public enum OverlayPosition: String, CaseIterable, Sendable { case nearCursor = "Near text cursor", screenBottom = "Bottom of screen" }
+    public enum OverlayPosition: String, CaseIterable, Sendable { case bottom = "Bottom of screen", top = "Top of screen"
+        public var detail: String { self == .bottom ? "64 pt above the Dock" : "Just below the menu bar" }
+    }
     public enum SoundSet: String, CaseIterable, Sendable { case soft = "Soft", click = "Click", chime = "Chime" }
-    public enum UpdateChannel: String, CaseIterable, Sendable { case stable = "Stable", beta = "Beta" }
-    public enum Compute: String, CaseIterable, Sendable { case automatic = "Automatic", neuralEngine = "Neural Engine", gpu = "GPU", cpu = "CPU only" }
     public enum Retention: String, CaseIterable, Sendable { case never = "Don’t keep", week = "7 days", month = "30 days", quarter = "90 days", forever = "Forever"
         public var days: Int? {
             switch self {
@@ -122,10 +122,13 @@ public final class SettingsStore {
     public var overlayPosition: OverlayPosition { didSet { save(overlayPosition.rawValue, "overlayPosition") } }
     public var accent: Accent { didSet { save(accent.rawValue, "accent"); Accent.current = accent } }
     public var appearance: Appearance { didSet { save(appearance.rawValue, "appearance") } }
-    public var checksForUpdates: Bool { didSet { save(checksForUpdates, "checksForUpdates") } }
-    public var updateChannel: UpdateChannel { didSet { save(updateChannel.rawValue, "updateChannel") } }
     /// Nil means "follow the system default input".
-    public var microphoneID: String? { didSet { save(microphoneID, "microphoneID") } }
+    public var microphoneID: String? { didSet {
+        save(microphoneID, "microphoneID")
+        // Kept so a microphone that is later unplugged can still be shown by name.
+        if let name = microphoneID.flatMap({ id in AudioDevices.inputs().first { $0.id == id }?.name }) { microphoneName = name }
+    } }
+    public private(set) var microphoneName: String? { didSet { save(microphoneName, "microphoneName") } }
     public var hasCompletedOnboarding: Bool { didSet { save(hasCompletedOnboarding, "hasCompletedOnboarding") } }
     /// Where onboarding got to. macOS quits an app when some permissions are switched in System Settings,
     /// so on the next launch onboarding picks up at the same step instead of starting over.
@@ -146,8 +149,6 @@ public final class SettingsStore {
 
     // Voice engine
     public var modelID: String { didSet { save(modelID, "modelID") } }
-    public var compute: Compute { didSet { save(compute.rawValue, "compute") } }
-    public var autoDetectLanguage: Bool { didSet { save(autoDetectLanguage, "autoDetectLanguage") } }
     public var language: String { didSet { save(language, "language") } }
 
     // AI cleanup
@@ -160,14 +161,11 @@ public final class SettingsStore {
     public var offlineMode: Bool { didSet { save(offlineMode, "offlineMode") } }
     public var logsNetworkActivity: Bool { didSet { save(logsNetworkActivity, "logsNetworkActivity") } }
     public var retention: Retention { didSet { save(retention.rawValue, "retention") } }
-    public var savesAudio: Bool { didSet { save(savesAudio, "savesAudio") } }
 
     // Advanced
     public var insertMethod: InsertMethod { didSet { save(insertMethod.rawValue, "insertMethod") } }
     public var restoresClipboard: Bool { didSet { save(restoresClipboard, "restoresClipboard") } }
     public var addsTrailingSpace: Bool { didSet { save(addsTrailingSpace, "addsTrailingSpace") } }
-    public var trimsSilence: Bool { didSet { save(trimsSilence, "trimsSilence") } }
-    public var silenceThreshold: Double { didSet { save(silenceThreshold, "silenceThreshold") } }
     public var maxLength: MaxLength { didSet { save(maxLength.rawValue, "maxLength") } }
     public var debugLog: Bool { didSet { save(debugLog, "debugLog"); DebugLog.isEnabled = debugLog } }
 
@@ -190,13 +188,12 @@ public final class SettingsStore {
         showInDock = bool("showInDock", false)
         soundsEnabled = bool("soundsEnabled", true)
         soundSet = raw("soundSet", .soft)
-        overlayPosition = raw("overlayPosition", .nearCursor)
+        overlayPosition = raw("overlayPosition", .bottom)
         accent = raw("accent", .ice)
         // Light is the default design; dark and Auto are there for people who ask for them.
         appearance = raw("appearance", .light)
-        checksForUpdates = bool("checksForUpdates", true)
-        updateChannel = raw("updateChannel", .stable)
         microphoneID = defaults.string(forKey: "microphoneID")
+        microphoneName = defaults.string(forKey: "microphoneName")
         hasCompletedOnboarding = bool("hasCompletedOnboarding", false)
         onboardingStep = defaults.integer(forKey: "onboardingStep")
 
@@ -212,8 +209,6 @@ public final class SettingsStore {
         mode = DictationMode.offered.contains(savedMode) ? savedMode : .raw
         // The built-in engine needs no download, so it is the one that works out of the box.
         modelID = defaults.string(forKey: "modelID") ?? "apple-speech"
-        compute = raw("compute", .automatic)
-        autoDetectLanguage = bool("autoDetectLanguage", false)
         language = defaults.string(forKey: "language") ?? "English"
 
         cleanupEnabled = bool("cleanupEnabled", false)
@@ -224,13 +219,10 @@ public final class SettingsStore {
         offlineMode = bool("offlineMode", false)
         logsNetworkActivity = bool("logsNetworkActivity", true)
         retention = raw("retention", .month)
-        savesAudio = bool("savesAudio", false)
 
         insertMethod = raw("insertMethod", .pasting)
         restoresClipboard = bool("restoresClipboard", true)
         addsTrailingSpace = bool("addsTrailingSpace", true)
-        trimsSilence = bool("trimsSilence", true)
-        silenceThreshold = defaults.object(forKey: "silenceThreshold") as? Double ?? 0.4
         maxLength = raw("maxLength", .five)
         debugLog = bool("debugLog", false)
 
@@ -243,18 +235,18 @@ public final class SettingsStore {
         let fresh = SettingsStore(defaults: UserDefaults(suiteName: "murmur-defaults-\(UUID().uuidString)")!)
         showInDock = fresh.showInDock; soundsEnabled = fresh.soundsEnabled; soundSet = fresh.soundSet
         overlayPosition = fresh.overlayPosition; accent = fresh.accent; appearance = fresh.appearance
-        checksForUpdates = fresh.checksForUpdates; updateChannel = fresh.updateChannel; microphoneID = nil
+        microphoneID = nil
         shortcut = fresh.shortcut; behavior = fresh.behavior; doubleTapToLock = fresh.doubleTapToLock
         cycleModeShortcut = fresh.cycleModeShortcut; reinsertShortcut = fresh.reinsertShortcut
         historyShortcut = fresh.historyShortcut; acceptedConflicts = []
-        mode = fresh.mode; modelID = fresh.modelID; compute = fresh.compute
-        autoDetectLanguage = fresh.autoDetectLanguage; language = fresh.language
+        mode = fresh.mode; modelID = fresh.modelID
+        language = fresh.language
         cleanupEnabled = fresh.cleanupEnabled; cleanupPreset = fresh.cleanupPreset; customInstructions = ""; appPresets = []
         offlineMode = fresh.offlineMode; logsNetworkActivity = fresh.logsNetworkActivity
-        retention = fresh.retention; savesAudio = fresh.savesAudio
+        retention = fresh.retention
         insertMethod = fresh.insertMethod; restoresClipboard = fresh.restoresClipboard
-        addsTrailingSpace = fresh.addsTrailingSpace; trimsSilence = fresh.trimsSilence
-        silenceThreshold = fresh.silenceThreshold; maxLength = fresh.maxLength; debugLog = fresh.debugLog
+        addsTrailingSpace = fresh.addsTrailingSpace
+        maxLength = fresh.maxLength; debugLog = fresh.debugLog
     }
 
     /// Settings as plain text for a bug report. No transcripts, no audio, no paths.
@@ -263,7 +255,7 @@ public final class SettingsStore {
             "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev",
             "macOS": ProcessInfo.processInfo.operatingSystemVersionString,
             "shortcut": shortcut.spokenName, "behavior": behavior.rawValue, "mode": mode.rawValue,
-            "model": modelID, "compute": compute.rawValue, "language": autoDetectLanguage ? "auto" : language,
+            "model": modelID, "language": language,
             "cleanup": cleanupEnabled ? cleanupPreset.rawValue : "off", "insertBy": insertMethod.rawValue,
             "restoresClipboard": String(restoresClipboard), "offlineMode": String(offlineMode),
             "retention": retention.rawValue, "appearance": appearance.rawValue, "accent": accent.rawValue,

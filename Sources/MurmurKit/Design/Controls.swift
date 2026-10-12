@@ -151,3 +151,23 @@ struct AppBadge: View {
         }
     }
 }
+
+/// Five green bars for the microphone in use. Only shows during a take: that is the only time
+/// Murmur listens, so it is the only time there is a level to show.
+struct ActiveMicMeter: View {
+    let controller: DictationController
+
+    var body: some View {
+        if controller.state.isRecording {
+            let lit = Int((Double(controller.levels.last ?? 0) * 5).rounded(.up))
+            HStack(alignment: .bottom, spacing: 2) {
+                ForEach(0..<5, id: \.self) { bar in
+                    RoundedRectangle(cornerRadius: 1).fill(bar < lit ? Tokens.success : Tokens.controlStrong)
+                        .frame(width: 3, height: CGFloat(4 + bar * 2))
+                }
+            }
+            .frame(height: 12)
+            .accessibilityLabel("Input level \(lit) of 5")
+        }
+    }
+}

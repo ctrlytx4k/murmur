@@ -13,6 +13,8 @@ public nonisolated struct TargetApp: Equatable, Sendable {
 public nonisolated struct InsertionSummary: Equatable, Sendable {
     public var appName: String
     public var wordCount: Int
+    /// "Copy instead": the text went to the clipboard, not into the app.
+    public var copied = false
 }
 
 public nonisolated struct Transcription: Equatable, Sendable {

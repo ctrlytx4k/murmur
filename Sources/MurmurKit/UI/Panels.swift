@@ -96,13 +96,25 @@ final class FloatingPanel: NSPanel {
 final class OverlayController {
     private let panel = FloatingPanel(level: .statusBar, allowsKey: false)
     private let controller: DictationController
+    private let settings: SettingsStore
+    private var position: SettingsStore.OverlayPosition?
 
     init(stores: Stores, actions: AppActions) {
         self.controller = stores.controller
-        panel.setContent(OverlayView(stores: stores).environment(\.appActions, actions), canvas: Self.canvas, alignment: .bottom) { [weak self] size in
+        self.settings = stores.settings
+        let view = OverlayView(stores: stores).environment(\.appActions, actions)
+        observeChanges { [weak self] in self?.pin(view) }
+        observeChanges { [weak self] in self?.update() }
+    }
+
+    /// The card grows away from the screen edge it sits against, so it is pinned to that edge of the canvas.
+    private func pin(_ view: some View) {
+        let position = settings.overlayPosition
+        guard position != self.position else { return }
+        self.position = position
+        panel.setContent(view, canvas: Self.canvas, alignment: position == .top ? .top : .bottom) { [weak self] size in
             self?.place(size)
         }
-        observeChanges { [weak self] in self?.update() }
     }
 
     /// Wide enough for the 400 pt card and tall enough for the tallest state, plus shadow room.
@@ -113,11 +125,12 @@ final class OverlayController {
         if controller.state == .idle { panel.fadeOut() } else { panel.fadeIn() }
     }
 
-    /// Centered, 64 pt above the Dock.
+    /// Centered: 64 pt above the Dock, or just below the menu bar.
     private func place(_ size: CGSize) {
         guard size.width > 0, let screen = NSScreen.main else { return }
         let area = screen.visibleFrame
-        let origin = NSPoint(x: (area.midX - size.width / 2).rounded(), y: area.minY + 64 - FloatingPanel.margin)
+        let y = position == .top ? area.maxY - 8 - size.height + FloatingPanel.margin : area.minY + 64 - FloatingPanel.margin
+        let origin = NSPoint(x: (area.midX - size.width / 2).rounded(), y: y)
         let frame = NSRect(origin: origin, size: size)
         guard panel.frame != frame else { return }
         DebugLog.log("overlay placed at \(Int(frame.minX)),\(Int(frame.minY)) size \(Int(frame.width))x\(Int(frame.height))")
