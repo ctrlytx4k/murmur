@@ -360,6 +360,8 @@ struct AddProviderSheet: View {
 struct ProviderSetupSheet: View {
     enum Phase: Equatable {
         case idle, working(String)
+        /// The key checked out and the models are listed; the user has to pick one.
+        case chooseModel
         case passed(CleanupRouter.TestResult)
         case failed(String)
     }
@@ -400,6 +402,7 @@ struct ProviderSetupSheet: View {
     private var passed: Bool { if case .passed = phase { true } else { false } }
     private var canTest: Bool {
         !isWorking && !provider.baseURL.trimmingCharacters(in: .whitespaces).isEmpty && (!kind.needsKey || workingKey?.isEmpty == false)
+            && (models.isEmpty || !provider.model.isEmpty)
     }
 
     var body: some View {
@@ -438,11 +441,7 @@ struct ProviderSetupSheet: View {
                     TextField("Found when you test", text: $provider.model).fieldChrome().font(.system(size: 12.5, design: .monospaced))
                         .onChange(of: provider.model) { reset() }
                 } else {
-                    GlassPopUpButton(
-                        label: "Model", options: models.map { ($0.id, $0.id) },
-                        selection: Binding(get: { provider.model }, set: { provider.model = $0; reset() }),
-                        details: Dictionary(uniqueKeysWithValues: models.filter { $0.line == "haiku" }.map { ($0.id, "fast · good for cleanup") }),
-                        maxHeight: 300)
+                    ModelList(models: models, selection: Binding(get: { provider.model }, set: { provider.model = $0; reset() }))
                 }
             }
             result
@@ -470,6 +469,11 @@ struct ProviderSetupSheet: View {
     @ViewBuilder private var result: some View {
         switch phase {
         case .idle: EmptyView()
+        case .chooseModel:
+            Label("Connected. Choose a model above, then test.", systemImage: "checkmark").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Tokens.success)
+                .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Tokens.successSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         case .working(let what):
             HStack(spacing: 8) {
                 Spinner()
@@ -522,8 +526,10 @@ struct ProviderSetupSheet: View {
                 }
                 if !models.isEmpty, !models.contains(where: { $0.id == provider.model }) {
                     // Anthropic says which models are its small fast line; that suits a clean-up. Otherwise the choice is the user's.
-                    guard let pick = models.first(where: { $0.line == "haiku" }) ?? (models.count == 1 ? models.first : nil) else {
-                        phase = .failed("Connected. Choose a model, then test again.")
+                    let usable = models.filter { ProviderAPI.canCleanText($0.id) }
+                    guard let pick = models.first(where: { $0.line == "haiku" }) ?? (usable.count == 1 ? usable.first : nil) else {
+                        provider.model = ""
+                        phase = .chooseModel
                         return
                     }
                     provider.model = pick.id
@@ -538,6 +544,63 @@ struct ProviderSetupSheet: View {
                 phase = .failed((error as? ProviderError ?? .unreachable).summary)
             }
         }
+    }
+}
+
+/// The provider's models as a list inside the sheet: a search box when there are many, one row each.
+/// Speech, image and embedding models are left out until they are searched for.
+private struct ModelList: View {
+    let models: [ProviderAPI.Model]
+    @Binding var selection: String
+    @State private var search = ""
+
+    private var usable: [ProviderAPI.Model] { models.filter { ProviderAPI.canCleanText($0.id) } }
+    private var shown: [ProviderAPI.Model] {
+        let query = search.trimmingCharacters(in: .whitespaces)
+        return query.isEmpty ? usable : models.filter { $0.id.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if models.count > 6 { SearchField(placeholder: "Search \(models.count) models", text: $search, height: 28) }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 1) {
+                        ForEach(shown, id: \.id) { model in row(model).id(model.id) }
+                        if shown.isEmpty {
+                            Text("No model matches “\(search)”.").font(.mmSub).foregroundStyle(Tokens.labelTertiary).frame(maxWidth: .infinity, minHeight: 30)
+                        }
+                    }
+                    .padding(4)
+                }
+                .frame(height: min(CGFloat(max(shown.count, 1)) * 31 + 8, 164))
+                .background(Tokens.control, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Tokens.stroke, lineWidth: 0.5))
+                .onAppear { proxy.scrollTo(selection, anchor: .center) }
+            }
+            let hidden = models.count - usable.count
+            if hidden > 0, search.isEmpty {
+                Text("\(hidden) speech, image and embedding models are left out. Search to find one.").font(.system(size: 11)).foregroundStyle(Tokens.labelTertiary)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Model")
+    }
+
+    private func row(_ model: ProviderAPI.Model) -> some View {
+        let on = model.id == selection
+        return Button { selection = model.id } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(Tokens.accentText).opacity(on ? 1 : 0).frame(width: 12)
+                Text(model.id).font(.system(size: 12.5, weight: on ? .semibold : .regular, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 8)
+                if model.line == "haiku" { Text("fast · good for cleanup").font(.system(size: 11)).foregroundStyle(Tokens.labelTertiary) }
+            }
+            .padding(.horizontal, 8).frame(height: 30)
+            .background(on ? Tokens.accentSoft : .clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        }
+        .buttonStyle(HoverRowStyle(cornerRadius: 7))
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
 

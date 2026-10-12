@@ -382,6 +382,18 @@ public nonisolated enum ProviderAPI {
         return provider.kind == .anthropic ? models : models.sorted { $0.id < $1.id }
     }
 
+    private static let notForText = [
+        "embedding", "whisper", "tts", "dall-e", "image", "audio", "realtime", "transcribe", "moderation", "babbage", "davinci",
+        "instruct", "search", "sora", "video", "rerank", "guard", "speech",
+    ]
+
+    /// False for the speech, image and embedding models a provider lists next to its chat models.
+    /// They cannot rewrite text, so the model list leaves them out unless they are searched for.
+    public static func canCleanText(_ id: String) -> Bool {
+        let id = id.lowercased()
+        return !notForText.contains { id.contains($0) }
+    }
+
     /// Why a request was turned down. Only the kind is kept: the server's words are never stored or logged.
     static func failure(status: Int, _ data: Data) -> ProviderError {
         let text = String(data: data, encoding: .utf8)?.lowercased() ?? ""

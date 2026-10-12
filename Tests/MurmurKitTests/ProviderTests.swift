@@ -216,6 +216,10 @@ final class FakeTransport: ProviderTransport, @unchecked Sendable {
         rig.transport.respond { _ in (429, #"{"error":{"type":"rate_limit_error"}}"#) }
         await #expect(throws: ProviderError.http(429)) { try await rig.router.test(claude, key: "k") }
         #expect(ProviderError.noCredit.summary == "The key works, but its account has no credit left")
+
+        // Models that cannot rewrite text are kept out of the list.
+        let listed = ["babbage-002", "chatgpt-image-latest", "gpt-4o-transcribe", "text-embedding-3-small", "whisper-1", "tts-1", "gpt-3.5-turbo-instruct", "gpt-4o", "gpt-3.5-turbo", "llama3.2:3b", "claude-haiku-5-5", "qwen2.5-7b"]
+        #expect(listed.filter(ProviderAPI.canCleanText) == ["gpt-4o", "gpt-3.5-turbo", "llama3.2:3b", "claude-haiku-5-5", "qwen2.5-7b"])
     }
 
     // MARK: the reply is checked

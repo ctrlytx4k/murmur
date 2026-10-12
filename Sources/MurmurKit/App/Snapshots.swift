@@ -143,6 +143,10 @@ enum Snapshots {
             stores: st, provider: ProviderConfig(kind: .anthropic, model: "claude-haiku-5-5"), isNew: true, key: "snapshot-not-a-key",
             models: [ProviderAPI.Model(id: "claude-haiku-5-5", name: "Claude Haiku 5.5", line: "haiku", supportsEffort: true)],
             phase: .passed(CleanupRouter.TestResult(sent: CleanupRouter.testSentence, received: "So, we should ship it Friday.", seconds: 0.7, provider: claude))))
+        add("sheet-provider-setup-choose", ProviderSetupSheet(
+            stores: st, provider: ProviderConfig(kind: .openAI), isNew: true, key: "snapshot-not-a-key",
+            models: ["babbage-002", "chatgpt-image-latest", "gpt-3.5-turbo", "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "gpt-4o-transcribe", "tts-1", "whisper-1"].map { ProviderAPI.Model(id: $0, name: $0) },
+            phase: .chooseModel))
         add("sheet-provider-setup-empty", ProviderSetupSheet(stores: st, provider: ProviderConfig(kind: .openAICompatible), isNew: true))
         add("sheet-provider-consent", ProviderConsentSheet(provider: claude))
         add("overlay-cloud-listening", OverlayView(stores: withProviders(recording)))
