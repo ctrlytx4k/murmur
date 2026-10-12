@@ -216,6 +216,7 @@ struct PrivacyPane: View {
     let stores: Stores
     private var settings: SettingsStore { stores.settings }
     @State private var confirmingClear = false
+    @State private var confirmingReset = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
@@ -272,6 +273,20 @@ struct PrivacyPane: View {
             Button("Clear History", role: .destructive) { stores.history.clear() }
         } message: {
             Text("This removes \(stores.history.entries.count) transcriptions from this Mac. It can’t be undone.")
+        }
+
+        SettingsGroup(title: "Stats on this Mac") {
+            SettingsRow(title: "Keep stats", subtitle: "Counts per take: words, time and the app. Never the text.", showsDivider: false) {
+                Button("Reset stats…") { confirmingReset = true }
+                    .buttonStyle(MurmurButtonStyle(kind: .danger, height: 28, fontSize: 12.5))
+                    .disabled(stores.stats.rows.isEmpty)
+                Toggle("Keep stats", isOn: bind(settings, \.keepStats)).toggleStyle(MurmurToggleStyle())
+            }
+        }
+        .confirmationDialog("Reset stats?", isPresented: $confirmingReset) {
+            Button("Reset Stats", role: .destructive) { stores.stats.reset() }
+        } message: {
+            Text("This deletes the counts for \(StatsFormat.takes(stores.stats.rows.count)) from this Mac. History is not touched. It can’t be undone.")
         }
     }
 

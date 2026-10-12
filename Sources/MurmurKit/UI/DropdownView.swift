@@ -7,6 +7,8 @@ enum DropdownSection { case model, microphone }
 struct DropdownView: View {
     let stores: Stores
     @State var expanded: DropdownSection?
+    /// Fixed for snapshots.
+    var statsToday: LocalDay?
     @Environment(\.appActions) private var actions
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Briefly true after Copy, so the button can confirm it worked.
@@ -24,7 +26,7 @@ struct DropdownView: View {
         VStack(spacing: 0) {
             header
             mainButton
-            if controller.state.isRecording { liveCard }
+            if controller.state.isRecording { liveCard } else { statsStrip }
             modePicker
             divider.padding(.horizontal, 10)
             infoRows
@@ -135,6 +137,21 @@ struct DropdownView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .chipSurface(cornerRadius: Tokens.Radius.card)
         .padding(EdgeInsets(top: 0, leading: 2, bottom: 10, trailing: 2))
+    }
+
+    /// Today's count. The whole strip opens Overview.
+    @ViewBuilder private var statsStrip: some View {
+        if !stores.stats.rows.isEmpty {
+            Button {
+                actions.closeDropdown()
+                actions.openOverview()
+            } label: {
+                StatsStrip(stores: stores, today: statsToday)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens Overview")
+            .padding(EdgeInsets(top: 0, leading: 2, bottom: 10, trailing: 2))
+        }
     }
 
     // MARK: engine and microphone
@@ -440,6 +457,10 @@ struct DropdownView: View {
 
     private var menuRows: some View {
         VStack(spacing: 0) {
+            menuRow("Open Overview…", shortcut: "⌘1") {
+                actions.closeDropdown()
+                actions.openOverview()
+            }
             menuRow("About Murmur") {
                 actions.closeDropdown()
                 actions.showAbout()

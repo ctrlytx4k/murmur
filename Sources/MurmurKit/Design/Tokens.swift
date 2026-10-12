@@ -25,6 +25,8 @@ public enum Tokens {
     public static let onAccent = dynamic { Accent.current.onFill(dark: $0) }
     public static let accentText = dynamic { Accent.current.text(dark: $0) }
     public static let accentSoft = dynamic { Accent.current.soft(dark: $0) }
+    /// The accent, held back: the comparison bars in a chart.
+    public static let accentMuted = dynamic { Accent.current.fill(dark: $0).withAlphaComponent($0 ? 0.32 : 0.26) }
 
     // Status. Reserved: never used for decoration.
     public static let recording = dynamic(light: 0xD92D20, dark: 0xFF6259)

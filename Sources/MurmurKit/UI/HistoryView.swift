@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Past transcriptions: a glass list on the left, the selected entry on the right. 1144 x 740.
+/// Past transcriptions: a glass list on the left, the selected entry on the right. The main window's second tab.
 struct HistoryView: View {
     enum Range: Hashable { case all, today, week }
 
@@ -38,19 +38,14 @@ struct HistoryView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(8)
-        .frame(width: 1144, height: 740)
-        .background(Tokens.windowBackground)
-        .foregroundStyle(Tokens.label)
-        .id(stores.settings.accent)
+        .padding(EdgeInsets(top: 0, leading: 8, bottom: 8, trailing: 8))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: list
 
     private var list: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("History").font(.system(size: 15, weight: .bold))
-                .frame(height: 44).padding(.leading, 88)
             VStack(spacing: 8) {
                 SearchField(placeholder: "Search raw and cleaned text", text: $search, height: 32)
                 HStack(spacing: 4) {
@@ -75,7 +70,7 @@ struct HistoryView: View {
                     .fixedSize()
                 }
             }
-            .padding(EdgeInsets(top: 0, leading: 12, bottom: 8, trailing: 12))
+            .padding(EdgeInsets(top: 12, leading: 12, bottom: 8, trailing: 12))
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {

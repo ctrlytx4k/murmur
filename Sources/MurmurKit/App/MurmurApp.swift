@@ -15,7 +15,8 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
     private var controller: DictationController!
     private var stores: Stores!
     private let navigation = SettingsNavigation()
-    private var historyWindow: NSWindow?
+    private let mainNavigation = MainNavigation()
+    private var mainWindow: NSWindow?
     private var actions = AppActions()
     private var hotkeys: LiveHotkeyService?
     private var router: EngineRouter?
@@ -63,13 +64,16 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         settings = SettingsStore(defaults: defaults)
         let history = HistoryStore(defaults: defaults)
         history.prune(retention: settings.retention)
+        let stats = StatsStore(defaults: defaults)
+        // Once: count the takes History already holds, so Overview does not start from nothing.
+        if !demo, settings.keepStats { stats.backfillOnce(from: history.entries) }
         let dictionary = DictionaryStore(defaults: defaults)
         let catalog: ModelCatalog
         if demo {
             // Simulated services: nothing is recorded and nothing is typed.
             controller = DictationController(
                 audio: DemoAudio(), engine: DemoEngine(), insertion: DemoInsertion(), permissions: DemoPermissions(),
-                settings: settings, cleanup: DemoCleanup(), history: history, dictionary: dictionary,
+                settings: settings, cleanup: DemoCleanup(), history: history, stats: stats, dictionary: dictionary,
                 frontmostApp: { DictationController.systemFrontmostApp() ?? TargetApp(name: "Notes", bundleIdentifier: "com.apple.Notes") })
             catalog = ModelCatalog(parakeetStatus: .available)
         } else {
@@ -79,7 +83,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             self.insertion = insertion
             controller = DictationController(
                 audio: audio, engine: router, insertion: insertion, permissions: LivePermissionsService(),
-                settings: settings, cleanup: AppleCleanup(), history: history, dictionary: dictionary)
+                settings: settings, cleanup: AppleCleanup(), history: history, stats: stats, dictionary: dictionary)
             audio.onDeviceChange = { [weak self] message in self?.controller.noteDeviceChange(message) }
             catalog = ModelCatalog(parakeetStatus: router.parakeet.isInstalled ? .installed : .available)
             catalog.onDownload = { [weak self] _ in self?.prepareParakeet(download: true) }
@@ -92,7 +96,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             self.hotkeys = hotkeys
         }
         stores = Stores(
-            controller: controller, settings: settings, dictionary: dictionary, history: history,
+            controller: controller, settings: settings, dictionary: dictionary, history: history, stats: stats,
             network: NetworkLog(defaults: defaults), catalog: catalog, isDemo: demo)
         router?.apple.onAssetDownload = { [weak self] in
             guard let self, self.settings.logsNetworkActivity else { return }
@@ -109,7 +113,8 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
 
         actions = AppActions(
             openSettings: { [weak self] pane in self?.showSettings(pane) },
-            openHistory: { [weak self] in self?.showHistory() },
+            openHistory: { [weak self] in self?.showMain(.history) },
+            openOverview: { [weak self] in self?.showMain(.overview) },
             openOnboarding: { [weak self] permission in self?.showOnboarding(at: permission.map(OnboardingStep.step(for:)) ?? .welcome) },
             showAbout: { [weak self] in self?.showAbout() },
             showAcknowledgements: { [weak self] in self?.showAcknowledgements() },
@@ -174,7 +179,10 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             showSettings(pane)
             await pause(0.6)
         }
-        showHistory()
+        showMain(.overview)
+        await pause(1.5)
+        print("tour: overview counts \(stores.stats.rows.count) takes, \(Stats.summary(rows: stores.stats.rows, period: .week, today: Stats.today(), typingWPM: settings.typingWPM).words) words in the last 7 days")
+        showMain(.history)
         await pause(1.5)
         showOnboarding(at: .microphone)
         await pause(2)
@@ -300,7 +308,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         switch action {
         case .cycleMode: settings.mode = settings.mode.next
         case .reinsertLast: controller.reinsertLast()
-        case .openHistory: showHistory()
+        case .openHistory: showMain(.history)
         case .selectMode(let index):
             guard DictationMode.offered.indices.contains(index) else { return }
             settings.mode = DictationMode.offered[index]
@@ -342,11 +350,16 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         present(settingsWindow)
     }
 
-    @objc private func showHistory() {
-        if historyWindow == nil {
-            historyWindow = makeWindow(HistoryView(stores: stores).environment(\.appActions, actions), title: "Murmur History")
+    @objc private func showOverview() { showMain(.overview) }
+    @objc private func showHistory() { showMain(.history) }
+
+    /// The main window: Overview and History as two tabs.
+    private func showMain(_ tab: MainTab) {
+        mainNavigation.tab = tab
+        if mainWindow == nil {
+            mainWindow = makeWindow(MainWindowView(stores: stores, navigation: mainNavigation).environment(\.appActions, actions), title: "Murmur")
         }
-        present(historyWindow)
+        present(mainWindow)
     }
 
     private func showOnboarding(at step: OnboardingStep) {
@@ -413,6 +426,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         app.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "").target = self
         app.addItem(.separator())
         app.addItem(withTitle: "Settings…", action: #selector(showSettingsFromMenu), keyEquivalent: ",").target = self
+        app.addItem(withTitle: "Overview", action: #selector(showOverview), keyEquivalent: "1").target = self
         app.addItem(withTitle: "History", action: #selector(showHistory), keyEquivalent: "y").target = self
         app.addItem(.separator())
         app.addItem(withTitle: "Quit Murmur", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")

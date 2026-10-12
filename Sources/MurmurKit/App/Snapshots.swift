@@ -34,9 +34,13 @@ enum Snapshots {
                 state: state, target: notes, levels: state.isRecording ? (silent ? nil : levels) : nil,
                 isSilent: silent, last: last, canUndo: last != nil, permissions: permissions, deviceNotice: notice)
             let stores = Stores(
-                controller: controller, settings: settings, dictionary: DictionaryStore(defaults: defaults), history: history,
+                controller: controller, settings: settings, dictionary: DictionaryStore(defaults: defaults), history: history, stats: StatsStore(defaults: defaults),
                 network: NetworkLog(defaults: defaults), catalog: ModelCatalog(parakeetStatus: .available), isDemo: !empty)
-            if !empty { DemoData.seed(stores) }
+            if !empty {
+                DemoData.seed(stores)
+                // The day the Stats board was drawn on, so the numbers can be checked against it.
+                stores.stats.replaceAll(StatsFixture.rows())
+            }
             return stores
         }
 
@@ -51,9 +55,15 @@ enum Snapshots {
 
         let recording = DictationState.recording(since: Date().addingTimeInterval(-7))
         var st = make(.idle, last: last)
-        add("dropdown-idle", DropdownView(stores: st))
-        add("dropdown-model-expanded", DropdownView(stores: st, expanded: .model))
-        add("dropdown-microphone-expanded", DropdownView(stores: st, expanded: .microphone))
+        let statsDay = StatsFixture.mockupToday
+        func mainShot(_ name: String, _ stores: Stores, _ tab: MainTab, hovered: Int? = nil, table: Bool = false) {
+            let navigation = MainNavigation()
+            navigation.tab = tab
+            add(name, MainWindowView(stores: stores, navigation: navigation, today: statsDay, hoveredBar: hovered, showsTable: table))
+        }
+        add("dropdown-idle", DropdownView(stores: st, statsToday: statsDay))
+        add("dropdown-model-expanded", DropdownView(stores: st, expanded: .model, statsToday: statsDay))
+        add("dropdown-microphone-expanded", DropdownView(stores: st, expanded: .microphone, statsToday: statsDay))
         add("menu-microphone", GlassMenu(items: [
             .header("Input"),
             GlassMenuItem(title: "System Default", detail: "Follows System Settings · MacBook Pro Microphone"),
@@ -80,7 +90,7 @@ enum Snapshots {
         st.overlay.open = .actions
         add("overlay-actions-open", OverlayView(stores: st))
         st = make(.idle, permissions: noMic, last: last)
-        add("dropdown-permission-missing", DropdownView(stores: st))
+        add("dropdown-permission-missing", DropdownView(stores: st, statsToday: statsDay))
         st = make(recording, silent: true, toggle: true)
         add("overlay-no-sound", OverlayView(stores: st))
         st = make(recording, notice: "USB mic disconnected. Now using MacBook Pro Microphone.")
@@ -105,13 +115,20 @@ enum Snapshots {
         settingsShot("settings-snippets", st, .dictionary, tab: .snippets)
         settingsShot("settings-privacy", st, .privacy)
         settingsShot("settings-advanced", st, .advanced)
-        add("history", HistoryView(stores: st))
+        mainShot("history", st, .history)
+        mainShot("overview", st, .overview, hovered: 8)
+        mainShot("overview-table", st, .overview, table: true)
         st = make(.idle)
         st.settings.historyShortcut = Shortcut(keyCode: 49, modifiers: .control)
         settingsShot("settings-hotkeys-conflict", st, .hotkeys)
         st = make(.idle, empty: true)
         settingsShot("settings-dictionary-empty", st, .dictionary)
-        add("history-empty", HistoryView(stores: st))
+        mainShot("history-empty", st, .history)
+        mainShot("overview-empty", st, .overview)
+        add("dropdown-first-run", DropdownView(stores: st))
+        st = make(.idle, empty: true)
+        st.settings.keepStats = false
+        mainShot("overview-stats-off", st, .overview)
 
         st = make(.idle)
         add("dialog-hotkey-conflict", HotkeyConflictDialog(settings: st.settings))
@@ -137,7 +154,7 @@ enum Snapshots {
                 ("light", NSAppearance.Name.aqua, NSColor(srgbRed: 0.87, green: 0.90, blue: 0.96, alpha: 1)),
                 ("dark", NSAppearance.Name.darkAqua, NSColor(srgbRed: 0.09, green: 0.10, blue: 0.19, alpha: 1)),
             ] {
-                let isWindow = ["settings", "onboarding", "history", "dialog-update"].contains { name.hasPrefix($0) }
+                let isWindow = ["settings", "onboarding", "history", "overview", "dialog-update"].contains { name.hasPrefix($0) }
                 let content = view
                     .clipShape(RoundedRectangle(cornerRadius: isWindow ? Tokens.Radius.window : 0, style: .continuous))
                     .padding(28)
