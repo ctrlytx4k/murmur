@@ -143,6 +143,12 @@ struct Harness {
         controller.hotkey(.up)
         #expect(controller.state.isRecording && controller.isLatched)
 
+        // A second press straight away is a double press and changes nothing.
+        clock += 0.1
+        controller.hotkey(.down)
+        controller.hotkey(.up)
+        #expect(controller.state.isRecording && controller.isLatched)
+
         // The next press ends the take; its release does nothing more.
         clock += 3
         controller.hotkey(.down)

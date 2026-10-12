@@ -120,7 +120,8 @@ private nonisolated func hotkeyTapCallback(proxy: CGEventTapProxy, type: CGEvent
     guard let refcon else { return Unmanaged.passUnretained(event) }
     let shared = Unmanaged<TapShared>.fromOpaque(refcon).takeUnretainedValue()
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-        // macOS switched the tap off. Switch it straight back on.
+        // macOS switched the tap off. Switch it straight back on. Keys pressed in between were missed.
+        DebugLog.log("tap switched off by macOS (\(type == .tapDisabledByTimeout ? "timeout" : "user input")), switched back on")
         shared.port.withLockUnchecked { if let port = $0 { CGEvent.tapEnable(tap: port, enable: true) } }
         return Unmanaged.passUnretained(event)
     }
@@ -129,7 +130,13 @@ private nonisolated func hotkeyTapCallback(proxy: CGEventTapProxy, type: CGEvent
     let flags = event.flags.rawValue
     let time = event.timestamp
     let result = shared.config.withLock { HotkeyDecision.decide(type: type, keyCode: keyCode, flags: flags, autorepeat: autorepeat, time: time, config: &$0) }
-    if let output = result.output { shared.deliver(output) }
+    if let output = result.output {
+        // The event's own clock, so a press can be told apart from when the main thread got to it.
+        if case .event(let kind) = output { DebugLog.log("tap \(kind) at \(time / 1_000_000) ms") }
+        shared.deliver(output)
+    } else if result.swallow, type == .keyDown, !autorepeat {
+        DebugLog.log("tap ignored a press: the shortcut still counted as held")
+    }
     return result.swallow ? nil : Unmanaged.passUnretained(event)
 }
 
@@ -263,6 +270,7 @@ public final class LiveHotkeyService: HotkeyService {
             if strikes >= 3 {
                 strikes = 0
                 shared.config.withLock { $0.dictationDown = false }
+                DebugLog.log("watchdog: the release never arrived, reporting it")
                 onEvent?(.up)
             }
         }

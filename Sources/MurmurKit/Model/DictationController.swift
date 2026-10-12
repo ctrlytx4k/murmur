@@ -42,6 +42,7 @@ public final class DictationController {
     @ObservationIgnored private let errorHold: Duration
     @ObservationIgnored private let silenceAfter: TimeInterval = 3
     @ObservationIgnored private let briefTake: TimeInterval = 1.5
+    @ObservationIgnored private let doublePress: TimeInterval = 0.5
 
     /// Bumped on every state change so late timers and late results can tell they are stale.
     @ObservationIgnored private var stateToken = 0
@@ -94,6 +95,8 @@ public final class DictationController {
         case (.cancel, _): cancel()
         case (.down, .pushToTalk):
             if state.isRecording, isLatched {
+                // A second press right on the heels of the first is a double press, not a finished take.
+                guard now().timeIntervalSince(recordingStarted) > doublePress else { return DebugLog.log("ignored a double press") }
                 stopAndInsert()
             } else {
                 pressedAt = now()
