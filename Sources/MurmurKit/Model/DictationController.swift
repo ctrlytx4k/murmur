@@ -41,6 +41,7 @@ public final class DictationController {
     @ObservationIgnored private let insertedHold: Duration
     @ObservationIgnored private let errorHold: Duration
     @ObservationIgnored private let silenceAfter: TimeInterval = 3
+    @ObservationIgnored private let briefTake: TimeInterval = 1.5
 
     /// Bumped on every state change so late timers and late results can tell they are stale.
     @ObservationIgnored private var stateToken = 0
@@ -222,7 +223,14 @@ public final class DictationController {
             return fail(.transcriptionFailed(error.localizedDescription), ifStill: token)
         }
         guard token == stateToken else { return }  // cancelled meanwhile
-        guard !heard.isEmpty else { return fail(.nothingHeard) }
+        guard !heard.isEmpty else {
+            // A brush of the shortcut is not a take worth reporting. A longer silence still is.
+            if seconds < briefTake {
+                set(.idle)
+                return
+            }
+            return fail(.nothingHeard)
+        }
 
         // A snippet trigger replaces the whole take and skips cleanup.
         if let dictionary, let snippet = TextProcessor.snippet(for: heard, in: dictionary.snippets) {

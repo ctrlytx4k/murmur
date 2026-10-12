@@ -73,17 +73,22 @@ struct Harness {
     private let box = Box()
 
     final class Box { var values: [String] = [] }
+    /// Seconds added to the controller's clock, to make a take look longer than it was.
+    final class Clock: @unchecked Sendable { var offset: TimeInterval = 0 }
+    let clock = Clock()
 
     init(cleanup: (any TextCleanupService)? = nil, app: TargetApp = TargetApp(name: "Notes")) {
         let suite = "murmur-tests-\(UUID().uuidString)"
         settings = SettingsStore(defaults: UserDefaults(suiteName: suite)!)
         let box = box
+        let clock = clock
         controller = DictationController(
             audio: audio, engine: engine, insertion: insertion, permissions: permissions, settings: settings,
             cleanup: cleanup,
             tapThreshold: 0,
             frontmostApp: { app },
             copyToClipboard: { box.values.append($0) },
+            now: { Date().addingTimeInterval(clock.offset) },
             insertedHold: .milliseconds(20), errorHold: .milliseconds(20))
     }
 
@@ -217,9 +222,21 @@ struct Harness {
         let h = Harness()
         h.engine.result = .success("   ")
         h.controller.start()
+        h.clock.offset = 3
         h.controller.stopAndInsert()
         await h.settle()
         #expect(h.controller.state == .error(.nothingHeard))
+        #expect(h.insertion.inserted.isEmpty)
+    }
+
+    @Test func briefEmptyTakeEndsQuietly() async {
+        let h = Harness()
+        h.engine.result = .success("")
+        h.controller.start()
+        h.clock.offset = 0.5
+        h.controller.stopAndInsert()
+        await h.settle()
+        #expect(h.controller.state == .idle)
         #expect(h.insertion.inserted.isEmpty)
     }
 
