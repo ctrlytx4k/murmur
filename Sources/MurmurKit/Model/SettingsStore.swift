@@ -144,6 +144,9 @@ public final class SettingsStore {
     public var meetingAudio: MeetingAudio { didSet { save(meetingAudio.rawValue, "meetingAudio") } }
     /// Tell the people on the call apart, once the speaker model is downloaded.
     public var meetingSpeakers: Bool { didSet { save(meetingSpeakers, "meetingSpeakers") } }
+    /// Show a ready-made "I'm recording" note at the start of each meeting.
+    public var meetingReminder: Bool { didSet { save(meetingReminder, "meetingReminder") } }
+    public static let recordingNote = "Heads up: I’m recording this call to transcribe it on my Mac."
     /// macOS does not say whether System Audio Recording is allowed, only that we asked.
     public var askedForSystemAudio: Bool { didSet { save(askedForSystemAudio, "askedForSystemAudio") } }
 
@@ -230,6 +233,7 @@ public final class SettingsStore {
         meetingAudio = raw("meetingAudio", .delete)
         askedForSystemAudio = bool("askedForSystemAudio", false)
         meetingSpeakers = bool("meetingSpeakers", true)
+        meetingReminder = bool("meetingReminder", true)
 
         shortcut = codable("shortcut", .rightOption)
         behavior = raw("behavior", .pushToTalk)
@@ -273,7 +277,7 @@ public final class SettingsStore {
         showInDock = fresh.showInDock; soundsEnabled = fresh.soundsEnabled; soundSet = fresh.soundSet
         overlay = OverlayAppearance(); accent = fresh.accent; appearance = fresh.appearance
         microphoneID = nil
-        meetingSource = fresh.meetingSource; meetingAudio = fresh.meetingAudio; meetingSpeakers = fresh.meetingSpeakers
+        meetingSource = fresh.meetingSource; meetingAudio = fresh.meetingAudio; meetingSpeakers = fresh.meetingSpeakers; meetingReminder = fresh.meetingReminder
         shortcut = fresh.shortcut; behavior = fresh.behavior; doubleTapToLock = fresh.doubleTapToLock
         cycleModeShortcut = fresh.cycleModeShortcut; reinsertShortcut = fresh.reinsertShortcut
         historyShortcut = fresh.historyShortcut; acceptedConflicts = []

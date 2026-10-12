@@ -56,7 +56,7 @@ Built in steps, each usable on its own:
 1. Record and transcribe: Meetings tab, Start and Stop, microphone plus call audio, raw transcript. Done.
 2. Speakers: tell the people on the call apart, with renaming. Done (pyannote Community-1 through FluidAudio, about 22 MB, downloaded on request).
 3. Summaries, only on request: a "Summarize with" pop-up listing every provider (local first), cloud behind the existing consent, Regenerate and Delete summary, long meetings in chunks. Done.
-4. "A call started, record it?", pause, the tell-people reminder, export, a Meetings settings pane. The recording pill itself (top center, draggable, left out of screen shares) is done.
+4. Done: the recording pill (top center, draggable, left out of screen shares), the tell-people reminder, export. Still to do: "a call started, record it?", pause, mute and mark on the pill, a shortcut to start and stop, a Meetings settings pane.
 
 ## Design
 - Source of truth: the mockup HTML in design/ (I will add it). Don't build UI until it's there.

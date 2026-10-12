@@ -222,6 +222,9 @@ struct MeetingsView: View {
                         }
                     }
                 }
+                SwitchRow(
+                    title: "Remind me to tell people I’m recording", subtitle: "Shows a one-click note you can paste in the chat",
+                    isOn: bind(settings, \.meetingReminder))
                 SettingsRow(title: "After transcribing", subtitle: "The transcript is always kept") {
                     GlassPopUpButton("After transcribing", selection: bind(settings, \.meetingAudio))
                 }
@@ -334,6 +337,25 @@ struct MeetingsView: View {
                         }
                     } label: { Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc") }
                         .buttonStyle(MurmurButtonStyle(height: 30, fontSize: 12.5))
+                }
+                if meeting.isTranscribed, !meeting.lines.isEmpty {
+                    GlassMenuButton(items: {
+                        [
+                            GlassMenuItem(title: "Markdown…", detail: "Headings and bold names") { export(meeting, markdown: true) },
+                            GlassMenuItem(title: "Plain text…", detail: "For email or notes") { export(meeting, markdown: false) },
+                        ]
+                    }) { isOpen in
+                        HStack(spacing: 6) {
+                            Image(systemName: "square.and.arrow.up").font(.system(size: 11, weight: .medium))
+                            Text("Export")
+                            Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)).rotationEffect(.degrees(isOpen ? 180 : 0))
+                        }
+                        .font(.system(size: 12.5, weight: .medium)).padding(.horizontal, 13).frame(height: 30).chipPill()
+                        .modifier(GlassMenuOpenHighlight(isOpen: isOpen, shape: Pill()))
+                        .contentShape(Pill())
+                    }
+                    .fixedSize()
+                    .accessibilityLabel("Export")
                 }
                 if meeting.hasAudio, meeting.isTranscribed {
                     Button { NSWorkspace.shared.activateFileViewerSelecting([store.microphoneURL(for: meeting.id)]) } label: { Label("Show Audio", systemImage: "waveform") }
@@ -634,6 +656,21 @@ struct MeetingsView: View {
         .overlay(shape.strokeBorder(Tokens.stroke, lineWidth: 0.5))
     }
 
+    /// Saves the meeting where the user chooses. The summary goes first if there is one; the transcript is as stored.
+    private func export(_ meeting: Meeting, markdown: Bool) {
+        let panel = NSSavePanel()
+        let name = meeting.title.isEmpty ? "Meeting" : meeting.title
+        panel.nameFieldStringValue = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: ".") + (markdown ? ".md" : ".txt")
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let day = "\(Self.day(meeting.date)) \(meeting.date.formatted(date: .abbreviated, time: .shortened)) · \(Self.length(meeting.duration))"
+        do {
+            try meeting.export(markdown: markdown, day: day) { Self.clock(meeting, $0) }.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+
     // MARK: words
 
     private func meta(_ meeting: Meeting) -> String {
@@ -663,6 +700,9 @@ struct MeetingsView: View {
 @Observable
 final class MeetingPillState {
     var finished: UUID?
+    /// The "let people know" note, for the first seconds of a recording.
+    var showsReminder = false
+    var copiedReminder = false
 }
 
 /// The small pill at the top of the screen while a meeting records or transcribes: proof it is running,
@@ -675,6 +715,34 @@ struct MeetingPillView: View {
     private var controller: MeetingController { stores.meeting }
 
     var body: some View {
+        VStack(spacing: 8) {
+            pillBody
+            if controller.state.isRecording, pill.showsReminder { reminder }
+        }
+    }
+
+    /// Shown for the first seconds: a note to paste into the call's chat, so everyone knows.
+    private var reminder: some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Let people know you’re recording").font(.system(size: 12.5, weight: .semibold))
+                Text("“\(SettingsStore.recordingNote)”").font(.system(size: 11.5)).foregroundStyle(Tokens.labelSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Button {
+                DictationController.systemCopy(SettingsStore.recordingNote)
+                pill.copiedReminder = true
+            } label: { Label(pill.copiedReminder ? "Copied" : "Copy", systemImage: pill.copiedReminder ? "checkmark" : "doc.on.doc") }
+                .buttonStyle(MurmurButtonStyle(height: 26, fontSize: 12))
+        }
+        .padding(EdgeInsets(top: 10, leading: 14, bottom: 10, trailing: 10))
+        .frame(width: 380)
+        .glassSurface(cornerRadius: 18)
+        .foregroundStyle(Tokens.label)
+    }
+
+    private var pillBody: some View {
         Group {
             switch controller.state {
             case .recording(let since):

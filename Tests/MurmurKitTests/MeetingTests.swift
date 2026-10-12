@@ -261,6 +261,20 @@ private final class FakeMeetingAudio: MeetingAudioService {
         #expect(broken.asked == 1 && meeting.isTranscribed && meeting.lines.count == 2 && meeting.voiceCount == 0)
     }
 
+    @Test func anExportCarriesTheSummaryThenTheTranscriptExactlyAsStored() {
+        var meeting = Meeting(title: "Design review", date: Date(), duration: 60, includesCallAudio: true)
+        meeting.setTranscript([
+            MeetingLine(start: 1, speaker: .you, text: "um so hello"), MeetingLine(start: 3, speaker: .others, voice: 1, text: "hi there"),
+        ], engine: "fake")
+        meeting.speakerNames = ["1": "Priya"]
+        let plain = meeting.export(markdown: false, day: "Today") { _ in "9:31" }
+        #expect(plain == "Design review\n\nToday\n\nTRANSCRIPT\n\n9:31 You: um so hello\n9:31 Priya: hi there\n")
+        meeting.summary = MeetingSummary(text: "Key points\n- one", provider: "Apple Intelligence", isLocal: true, date: Date())
+        let markdown = meeting.export(markdown: true, day: "Today") { _ in "9:31" }
+        #expect(markdown.hasPrefix("# Design review\n\nToday\n\n## Summary\n\n**Key points**\n- one\n\n_Summary by Apple Intelligence · on this Mac_\n\n## Transcript\n\n"))
+        #expect(markdown.hasSuffix("- 9:31 **You:** um so hello\n- 9:31 **Priya:** hi there\n"))
+    }
+
     // MARK: the store
 
     @Test func theRawTranscriptIsWrittenOnceAndNeverReplaced() {

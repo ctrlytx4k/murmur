@@ -209,11 +209,15 @@ final class MeetingPillController {
     private let controller: MeetingController
     private let pill = MeetingPillState()
     private var wasBusy = false
+    private var wasRecording = false
     private var placed = false
     private var hide: Task<Void, Never>?
+    private var reminder: Task<Void, Never>?
+    private let settings: SettingsStore
 
     init(stores: Stores, actions: AppActions) {
         controller = stores.meeting
+        settings = stores.settings
         // Left out of screen sharing, screen recording and screenshots.
         panel.sharingType = .none
         panel.isMovableByWindowBackground = true
@@ -223,10 +227,25 @@ final class MeetingPillController {
         observeChanges { [weak self] in self?.update() }
     }
 
-    private static let canvas = CGSize(width: 460, height: 36 + 2 * FloatingPanel.margin)
+    private static let canvas = CGSize(width: 460, height: 130 + 2 * FloatingPanel.margin)
 
     private func update() {
         let busy = !controller.state.isIdle
+        let recording = controller.state.isRecording
+        if recording, !wasRecording, settings.meetingReminder {
+            // The note stays long enough to read and copy, then gets out of the way.
+            pill.copiedReminder = false
+            pill.showsReminder = true
+            reminder?.cancel()
+            reminder = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(20))
+                if !Task.isCancelled { self?.pill.showsReminder = false }
+            }
+        } else if !recording, wasRecording {
+            reminder?.cancel()
+            pill.showsReminder = false
+        }
+        wasRecording = recording
         if busy {
             hide?.cancel()
             pill.finished = nil

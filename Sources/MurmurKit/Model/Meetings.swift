@@ -125,6 +125,23 @@ public nonisolated struct Meeting: Codable, Equatable, Identifiable, Sendable {
     /// How many different voices were heard on the call.
     public var voiceCount: Int { Set(lines.compactMap(\.voice)).count }
 
+    /// The meeting as a document to share: the summary if there is one, then the raw transcript.
+    public func export(markdown: Bool, day: String, clock: (Double) -> String) -> String {
+        var parts: [String] = [markdown ? "# \(title)" : title, day]
+        if let summary {
+            parts.append(markdown ? "## Summary" : "SUMMARY")
+            parts.append(markdown ? summary.text.replacingOccurrences(of: "Key points", with: "**Key points**").replacingOccurrences(of: "Action items", with: "**Action items**") : summary.text)
+            parts.append(markdown ? "_\(summary.byline)_" : summary.byline)
+        }
+        parts.append(markdown ? "## Transcript" : "TRANSCRIPT")
+        if markdown {
+            parts.append(lines.map { line in "- \(clock(line.start)) \(label(for: line).map { "**\($0):** " } ?? "")\(line.text)" }.joined(separator: "\n"))
+        } else {
+            parts.append(text(clock: clock))
+        }
+        return parts.joined(separator: "\n\n") + "\n"
+    }
+
     /// The transcript as plain text, one line per turn.
     public func text(clock: (Double) -> String) -> String {
         lines.map { line in "\(clock(line.start)) \(label(for: line).map { "\($0): " } ?? "")\(line.text)" }.joined(separator: "\n")

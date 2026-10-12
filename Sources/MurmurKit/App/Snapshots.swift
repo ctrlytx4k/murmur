@@ -170,6 +170,9 @@ enum Snapshots {
             add("meetings-recording", MainWindowMeeting(stores: live, selection: nil))
             add("dropdown-meeting-recording", DropdownView(stores: live, statsToday: statsDay))
             add("meeting-pill-recording", MeetingPillView(stores: live, pill: MeetingPillState()))
+            let nudge = MeetingPillState()
+            nudge.showsReminder = true
+            add("meeting-pill-reminder", MeetingPillView(stores: live, pill: nudge))
             let done = MeetingPillState()
             done.finished = st.meetings.meetings.first?.id
             add("meeting-pill-ready", MeetingPillView(stores: st, pill: done))
