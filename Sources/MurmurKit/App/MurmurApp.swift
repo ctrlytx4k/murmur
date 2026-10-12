@@ -68,12 +68,15 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         // Once: count the takes History already holds, so Overview does not start from nothing.
         if !demo, settings.keepStats { stats.backfillOnce(from: history.entries) }
         let dictionary = DictionaryStore(defaults: defaults)
+        let network = NetworkLog(defaults: defaults)
+        // The demo never touches the Keychain or the network.
+        let providers = ProviderStore(defaults: defaults, keys: demo ? MemoryKeyStore() : KeychainKeyStore())
         let catalog: ModelCatalog
         if demo {
             // Simulated services: nothing is recorded and nothing is typed.
             controller = DictationController(
                 audio: DemoAudio(), engine: DemoEngine(), insertion: DemoInsertion(), permissions: DemoPermissions(),
-                settings: settings, cleanup: DemoCleanup(), history: history, stats: stats, dictionary: dictionary,
+                settings: settings, cleanup: DemoCleanup(), history: history, stats: stats, providers: providers, network: network, dictionary: dictionary,
                 frontmostApp: { DictationController.systemFrontmostApp() ?? TargetApp(name: "Notes", bundleIdentifier: "com.apple.Notes") })
             catalog = ModelCatalog(parakeetStatus: .available)
         } else {
@@ -83,7 +86,8 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             self.insertion = insertion
             controller = DictationController(
                 audio: audio, engine: router, insertion: insertion, permissions: LivePermissionsService(),
-                settings: settings, cleanup: AppleCleanup(), history: history, stats: stats, dictionary: dictionary)
+                settings: settings, cleanup: AppleCleanup(), history: history, stats: stats,
+                providers: providers, providerTransport: URLSessionProviderTransport(), network: network, dictionary: dictionary)
             audio.onDeviceChange = { [weak self] message in self?.controller.noteDeviceChange(message) }
             catalog = ModelCatalog(parakeetStatus: router.parakeet.isInstalled ? .installed : .available)
             catalog.onDownload = { [weak self] _ in self?.prepareParakeet(download: true) }
@@ -96,8 +100,8 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             self.hotkeys = hotkeys
         }
         stores = Stores(
-            controller: controller, settings: settings, dictionary: dictionary, history: history, stats: stats,
-            network: NetworkLog(defaults: defaults), catalog: catalog, isDemo: demo)
+            controller: controller, settings: settings, dictionary: dictionary, history: history, stats: stats, providers: providers,
+            network: network, catalog: catalog, isDemo: demo)
         router?.apple.onAssetDownload = { [weak self] in
             guard let self, self.settings.logsNetworkActivity else { return }
             self.stores.network.record(host: "Apple (via macOS)", reason: "Speech language download", bytes: 0)

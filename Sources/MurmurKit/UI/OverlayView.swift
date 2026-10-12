@@ -11,7 +11,11 @@ struct OverlayView: View {
     private var settings: SettingsStore { stores.settings }
     private var panels: OverlayPanelState { stores.overlay }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private var cleaning: Bool { settings.mode == .cleaned && settings.cleanupEnabled && stores.controller.cleanupAvailability.isAvailable }
+    private var cleaning: Bool { controller.cleanupDestination != nil && controller.cleanupAvailability.isAvailable }
+    /// The cloud provider this take's text will go to, if any.
+    private var cloudName: String? { controller.cleanupDestination?.cloudName }
+    /// Why a take is staying on this Mac although a cloud provider is selected.
+    private var stayingLocal: String? { if case .thisMac(let reason?) = controller.cleanupDestination { reason } else { nil } }
 
     var body: some View {
         Group {
@@ -34,6 +38,7 @@ struct OverlayView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 targetLabel
+                destinationChip
                 Spacer()
                 modePill
                 moreButton
@@ -118,8 +123,9 @@ struct OverlayView: View {
             HStack(spacing: 6) {
                 targetLabel
                 Spacer()
-                Spinner()
-                Text(cleaning ? "Cleaning up…" : "Transcribing…").font(.mmSub).foregroundStyle(Tokens.labelTertiary)
+                Spinner(color: cloudName == nil ? Tokens.accentText : Tokens.warning)
+                Text(cloudName.map { "Cleaning up with \($0)…" } ?? stayingLocal.map { "\($0) · cleaning up here…" } ?? (cleaning ? "Cleaning up…" : "Transcribing…"))
+                    .font(.mmSub).foregroundStyle(Tokens.labelTertiary).lineLimit(1)
             }
             .frame(height: 26)
             .padding(EdgeInsets(top: 10, leading: 12, bottom: 0, trailing: 14))
@@ -130,7 +136,7 @@ struct OverlayView: View {
         .frame(width: 400)
         .glassSurface(cornerRadius: Tokens.Radius.overlay)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Transcribing")
+        .accessibilityLabel(cloudName.map { "Transcribing, then cleaning up with \($0)" } ?? "Transcribing")
     }
 
     // MARK: inserted
@@ -139,9 +145,13 @@ struct OverlayView: View {
         HStack(spacing: 10) {
             Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Tokens.success)
                 .frame(width: 30, height: 30).background(Tokens.successSoft, in: Circle())
-            Text(summary.copied ? "Copied to the clipboard" : "Inserted into \(summary.appName)").font(.system(size: 13.5, weight: .semibold))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(summary.copied ? "Copied to the clipboard" : "Inserted into \(summary.appName)").font(.system(size: 13.5, weight: .semibold))
+                // The chosen provider did not do the clean-up: say what happened instead.
+                if let note = summary.note { Text(note).font(.system(size: 11)).foregroundStyle(Tokens.warning) }
+            }
             Text("\(summary.wordCount) \(summary.wordCount == 1 ? "word" : "words")").font(.mmCallout).foregroundStyle(Tokens.labelTertiary)
-            if !summary.copied {
+            if !summary.copied, summary.note == nil {
                 HStack(spacing: 4) {
                     hintKey("⌘Z")
                     Text("undo").font(.system(size: 10.5)).foregroundStyle(Tokens.labelTertiary)
@@ -393,6 +403,28 @@ struct OverlayView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Dismiss")
+    }
+
+    /// Where this take's text is going for clean-up, whenever that is not simply "this Mac, as always".
+    @ViewBuilder private var destinationChip: some View {
+        switch controller.cleanupDestination {
+        case .cloud(let name):
+            HStack(spacing: 4) {
+                Image(systemName: "cloud").font(.system(size: 9, weight: .bold))
+                Text("via \(name)").font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
+            }
+            .foregroundStyle(Tokens.warning)
+            .padding(.horizontal, 7).frame(height: 20)
+            .background(Tokens.warningSoft, in: Pill())
+            .accessibilityLabel("Clean-up text will be sent to \(name)")
+        case .thisMac(let reason?):
+            // A cloud provider is selected, but this take stays here. The reason is said while it is cleaned up.
+            PlaceBadge(isLocal: true)
+                .help(reason)
+                .accessibilityLabel("Cleaned up on this Mac. \(reason)")
+        default:
+            EmptyView()
+        }
     }
 
     private var targetLabel: some View {

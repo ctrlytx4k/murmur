@@ -43,6 +43,8 @@ final class SettingsNavigation {
 struct SettingsView: View {
     let stores: Stores
     let navigation: SettingsNavigation
+    /// Fixed for snapshots: what each provider's status reads in AI Cleanup.
+    var cleanupStatus: [String: String] = [:]
     @Environment(\.appActions) private var actions
 
     private var settings: SettingsStore { stores.settings }
@@ -57,7 +59,10 @@ struct SettingsView: View {
                     HStack(spacing: 10) {
                         Text(navigation.pane.rawValue).font(.mmPaneTitle)
                         Spacer()
-                        if let note = navigation.pane.note {
+                        if navigation.pane == .cleanup, stores.providers.selected.isCloud {
+                            // Says so in the pane's title whenever cleanup text leaves this Mac.
+                            PlaceBadge(isLocal: false, cloudText: "Using a cloud provider", height: 24)
+                        } else if let note = navigation.pane.note {
                             Text(note).font(.mmSub).foregroundStyle(Tokens.labelSecondary)
                                 .padding(.horizontal, 10).frame(height: 24).chipPill()
                         }
@@ -69,7 +74,7 @@ struct SettingsView: View {
                             case .general: GeneralPane(stores: stores)
                             case .hotkeys: HotkeysPane(settings: settings)
                             case .voiceEngine: VoiceEnginePane(stores: stores)
-                            case .cleanup: CleanupPane(stores: stores)
+                            case .cleanup: CleanupPane(stores: stores, providerStatus: cleanupStatus)
                             case .privacy: PrivacyPane(stores: stores)
                             case .advanced: AdvancedPane(stores: stores)
                             case .dictionary: EmptyView()

@@ -27,14 +27,15 @@ enum Snapshots {
             settings.mode = .cleaned
             settings.cleanupEnabled = true
             let history = HistoryStore(defaults: defaults)
+            let providers = ProviderStore(defaults: defaults, keys: MemoryKeyStore())
             let controller = DictationController(
                 audio: DemoAudio(), engine: DemoEngine(), insertion: DemoInsertion(),
-                permissions: DemoPermissions(permissions), settings: settings, cleanup: DemoCleanup(), errorHold: .seconds(3600))
+                permissions: DemoPermissions(permissions), settings: settings, cleanup: DemoCleanup(), providers: providers, errorHold: .seconds(3600))
             controller.loadPreview(
                 state: state, target: notes, levels: state.isRecording ? (silent ? nil : levels) : nil,
                 isSilent: silent, last: last, canUndo: last != nil, permissions: permissions, deviceNotice: notice)
             let stores = Stores(
-                controller: controller, settings: settings, dictionary: DictionaryStore(defaults: defaults), history: history, stats: StatsStore(defaults: defaults),
+                controller: controller, settings: settings, dictionary: DictionaryStore(defaults: defaults), history: history, stats: StatsStore(defaults: defaults), providers: providers,
                 network: NetworkLog(defaults: defaults), catalog: ModelCatalog(parakeetStatus: .available), isDemo: !empty)
             if !empty {
                 DemoData.seed(stores)
@@ -118,6 +119,38 @@ enum Snapshots {
         mainShot("history", st, .history)
         mainShot("overview", st, .overview, hovered: 8)
         mainShot("overview-table", st, .overview, table: true)
+        // Bring your own provider: the pane with a cloud provider in use, the three sheets and the overlay.
+        let claude = ProviderConfig(id: "claude", kind: .anthropic, model: "claude-haiku-5-5")
+        func withProviders(_ state: DictationState, stayLocal: Bool = false) -> Stores {
+            let stores = make(state)
+            stores.providers.save(ProviderConfig(id: "ollama", kind: .localServer, name: "Ollama", model: "llama3.2:3b"), key: nil)
+            stores.providers.save(claude, key: "snapshot")
+            stores.providers.save(ProviderConfig(id: "work", kind: .openAICompatible, name: "Work server", model: "qwen2.5-7b", baseURL: "https://llm.internal:8080/v1"), key: nil)
+            stores.providers.grantConsentAndSelect("claude")
+            stores.providers.stayLocalApps = [StayLocalApp(bundleIdentifier: "com.apple.mail", name: "Mail"), StayLocalApp(bundleIdentifier: "com.apple.MobileSMS", name: "Messages")]
+            if stayLocal { stores.providers.stayLocalApps.append(StayLocalApp(bundleIdentifier: "com.apple.Notes", name: "Notes")) }
+            return stores
+        }
+        st = withProviders(.idle)
+        do {
+            let navigation = SettingsNavigation()
+            navigation.pane = .cleanup
+            add("settings-ai-cleanup-cloud", SettingsView(stores: st, navigation: navigation, cleanupStatus: ["ollama": "Running", "work": "Not reachable"]))
+        }
+        settingsShot("settings-privacy-cloud", st, .privacy)
+        add("sheet-provider-add", AddProviderSheet(router: st.controller.cleanupRouter, found: [ProviderConfig(kind: .localServer, name: "Ollama")]))
+        add("sheet-provider-setup", ProviderSetupSheet(
+            stores: st, provider: ProviderConfig(kind: .anthropic, model: "claude-haiku-5-5"), isNew: true, key: "snapshot-not-a-key",
+            models: [ProviderAPI.Model(id: "claude-haiku-5-5", name: "Claude Haiku 5.5", line: "haiku", supportsEffort: true)],
+            phase: .passed(CleanupRouter.TestResult(sent: CleanupRouter.testSentence, received: "So, we should ship it Friday.", seconds: 0.7, provider: claude))))
+        add("sheet-provider-setup-empty", ProviderSetupSheet(stores: st, provider: ProviderConfig(kind: .openAICompatible), isNew: true))
+        add("sheet-provider-consent", ProviderConsentSheet(provider: claude))
+        add("overlay-cloud-listening", OverlayView(stores: withProviders(recording)))
+        add("overlay-cloud-processing", OverlayView(stores: withProviders(.processing)))
+        add("overlay-stay-local", OverlayView(stores: withProviders(recording, stayLocal: true)))
+        add("overlay-stay-local-processing", OverlayView(stores: withProviders(.processing, stayLocal: true)))
+        add("overlay-cloud-fallback", OverlayView(stores: withProviders(.inserted(InsertionSummary(appName: "Notes", wordCount: 18, note: "Claude didn’t answer, cleaned up on this Mac")))))
+
         st = make(.idle)
         st.settings.historyShortcut = Shortcut(keyCode: 49, modifiers: .control)
         settingsShot("settings-hotkeys-conflict", st, .hotkeys)
@@ -154,7 +187,7 @@ enum Snapshots {
                 ("light", NSAppearance.Name.aqua, NSColor(srgbRed: 0.87, green: 0.90, blue: 0.96, alpha: 1)),
                 ("dark", NSAppearance.Name.darkAqua, NSColor(srgbRed: 0.09, green: 0.10, blue: 0.19, alpha: 1)),
             ] {
-                let isWindow = ["settings", "onboarding", "history", "overview", "dialog-update"].contains { name.hasPrefix($0) }
+                let isWindow = ["settings", "onboarding", "history", "overview", "sheet", "dialog-update"].contains { name.hasPrefix($0) }
                 let content = view
                     .clipShape(RoundedRectangle(cornerRadius: isWindow ? Tokens.Radius.window : 0, style: .continuous))
                     .padding(28)

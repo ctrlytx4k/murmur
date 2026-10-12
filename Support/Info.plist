@@ -14,6 +14,10 @@
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSHumanReadableCopyright</key><string>Free and open source under the MIT license.</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key><true/>
+  </dict>
   <key>NSMicrophoneUsageDescription</key><string>Murmur listens only while you hold or toggle your dictation shortcut. Audio is transcribed on this Mac.</string>
 </dict>
 </plist>

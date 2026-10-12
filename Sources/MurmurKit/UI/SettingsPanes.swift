@@ -107,6 +107,8 @@ struct VoiceEnginePane: View {
 struct CleanupPane: View {
     let stores: Stores
     private var settings: SettingsStore { stores.settings }
+    /// Fixed for snapshots: what each provider's status reads.
+    var providerStatus: [String: String] = [:]
     private let presetOptions: [(String, String)] = [("raw", "Raw")] + CleanupPreset.allCases.map { ($0.rawValue, $0.name) }
 
     var body: some View {
@@ -115,17 +117,10 @@ struct CleanupPane: View {
                 title: "Clean up text after transcription",
                 subtitle: "Fixes punctuation and casing, drops filler words. Used by Cleaned up mode.",
                 first: true, isOn: bind(settings, \.cleanupEnabled))
-            switch stores.controller.cleanupAvailability {
-            case .available(let model):
-                SettingsRow(title: model, subtitle: stores.isDemo ? "Simulated · drops filler words only" : "Built into macOS · runs on this Mac, nothing is sent anywhere") {
-                    Text("Ready").font(.mmSub).fontWeight(.semibold).foregroundStyle(Tokens.success)
-                }
-            case .unavailable(let reason):
-                SettingsRow(title: reason, subtitle: "Until it is available, Cleaned up mode inserts the text as spoken") {
-                    Text("Unavailable").font(.mmSub).fontWeight(.semibold).foregroundStyle(Tokens.warning)
-                }
-            }
         }
+
+        ProviderSection(stores: stores, status: providerStatus)
+        if stores.providers.hasCloudProvider { CloudRulesGroup(stores: stores) }
 
         VStack(alignment: .leading, spacing: 8) {
             Text("Default preset").font(.mmBodyEmphasis).padding(.leading, 4)
@@ -224,8 +219,11 @@ struct PrivacyPane: View {
                 .frame(width: 44, height: 44)
                 .background(Tokens.accent, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
             VStack(alignment: .leading, spacing: 6) {
-                Text("Nothing you say leaves your Mac.").font(.system(size: 19, weight: .bold)).kerning(-0.2)
-                Text("Audio is transcribed on this Mac and discarded once the text is ready. No account, no analytics, no crash uploads. The only network use is model downloads and update checks, and you can switch both off.")
+                let cloud = stores.providers.selected.isCloud ? stores.providers.selected : nil
+                Text(cloud == nil ? "Nothing you say leaves your Mac." : "Your voice stays on this Mac. Cleanup text goes to \(cloud?.name ?? "").").font(.system(size: 19, weight: .bold)).kerning(-0.2)
+                Text(cloud == nil
+                    ? "Audio is transcribed on this Mac and discarded once the text is ready. No account, no analytics, no crash uploads. By default the only network use is model downloads and update checks. Add a cloud provider in AI Cleanup and the text of your takes goes to it; the log below shows every request."
+                    : "Audio is transcribed on this Mac and never sent anywhere. Because you chose a cloud provider for AI Cleanup, the text of each Cleaned up take goes to \(cloud?.hostLabel ?? ""). The log below shows every request. No account, no analytics, no crash uploads.")
                     .font(.system(size: 12.5)).lineSpacing(3).foregroundStyle(Tokens.labelSecondary).fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -235,21 +233,25 @@ struct PrivacyPane: View {
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Tokens.stroke, lineWidth: 0.5))
 
         SettingsGroup(title: "Network") {
-            SwitchRow(title: "Offline mode", subtitle: "Blocks model and language downloads. Dictation itself never uses the network.", first: true, isOn: bind(settings, \.offlineMode))
-            SwitchRow(title: "Log network activity", subtitle: "Keeps a local record of every download Murmur starts", isOn: bind(settings, \.logsNetworkActivity))
+            SwitchRow(title: "Offline mode", subtitle: "Blocks model and language downloads and every cloud provider. Transcription never uses the network.", first: true, isOn: bind(settings, \.offlineMode))
+            SwitchRow(title: "Log network activity", subtitle: "Keeps a local record of every download Murmur starts. Requests to AI providers are always recorded.", isOn: bind(settings, \.logsNetworkActivity))
             logRow(["When", "Host", "Why", "Size"]).font(.system(size: 10.5, weight: .semibold)).textCase(.uppercase).foregroundStyle(Tokens.labelTertiary)
                 .frame(height: 26).background(Tokens.control)
                 .overlay(alignment: .top) { Rectangle().fill(Tokens.separator).frame(height: 1) }
             ForEach(stores.network.entries.prefix(5)) { entry in
                 logRow([
-                    entry.date.formatted(.dateTime.weekday(.abbreviated).hour().minute()), entry.host, entry.reason,
-                    ByteCountFormatter.string(fromByteCount: Int64(entry.bytes), countStyle: .file),
+                    entry.date.formatted(.dateTime.weekday(.abbreviated).hour().minute()), entry.isLocal == true ? "\(entry.host) · this Mac" : entry.host, entry.reason,
+                    entry.isProvider == true
+                        ? "↑ \(ByteCountFormatter.string(fromByteCount: Int64(entry.bytes), countStyle: .file)) ↓ \(ByteCountFormatter.string(fromByteCount: Int64(entry.received ?? 0), countStyle: .file))"
+                        : ByteCountFormatter.string(fromByteCount: Int64(entry.bytes), countStyle: .file),
                 ])
                 .font(.mmCallout).foregroundStyle(Tokens.labelSecondary).frame(minHeight: 30)
                 .overlay(alignment: .top) { Rectangle().fill(Tokens.separator).frame(height: 1) }
             }
             HStack {
-                Text(stores.network.entries.isEmpty ? "No requests recorded · audio and text sent: 0 bytes" : "\(stores.network.entries.count) requests recorded · audio and text sent: 0 bytes")
+                let textSent = stores.network.bytesSentToCloud
+                let sent = textSent == 0 ? "audio and text sent: 0 bytes" : "audio sent: 0 bytes · text sent to cloud providers: \(ByteCountFormatter.string(fromByteCount: Int64(textSent), countStyle: .file))"
+                Text(stores.network.entries.isEmpty ? "No requests recorded · \(sent)" : "\(stores.network.entries.count) requests recorded · \(sent)")
                     .font(.mmCallout).foregroundStyle(Tokens.labelTertiary)
                 Spacer()
                 Button("Clear") { stores.network.clear() }.buttonStyle(MurmurButtonStyle(height: 26, fontSize: 12)).disabled(stores.network.entries.isEmpty)
@@ -295,7 +297,7 @@ struct PrivacyPane: View {
             Text(cells[0]).monospacedDigit().frame(width: 96, alignment: .leading)
             Text(cells[1]).frame(width: 130, alignment: .leading)
             Text(cells[2]).frame(maxWidth: .infinity, alignment: .leading)
-            Text(cells[3]).monospacedDigit().frame(width: 70, alignment: .trailing)
+            Text(cells[3]).monospacedDigit().frame(width: 124, alignment: .trailing)
         }
         .lineLimit(1)
         .padding(.horizontal, 14)

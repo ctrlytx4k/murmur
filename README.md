@@ -2,7 +2,7 @@
 
 Free, open-source voice dictation for macOS that stays on your Mac.
 
-Hold a shortcut, speak, and the text appears in whatever app you are using. There is no account, no subscription and no cloud: your voice is transcribed on your own machine.
+Hold a shortcut, speak, and the text appears in whatever app you are using. There is no account and no subscription, and your voice is transcribed on your own machine. By default, nothing you say leaves your Mac.
 
 ## What it does
 
@@ -17,7 +17,8 @@ Hold a shortcut, speak, and the text appears in whatever app you are using. Ther
 ## Privacy
 
 - Audio is transcribed on your Mac and is never uploaded.
-- The only network traffic is the speech model download, the language files macOS fetches for its own speech engine, and the releases page when you choose "Check for Updates". Offline mode blocks the downloads too.
+- By default, nothing you say leaves your Mac. Add a cloud provider for AI Cleanup and the text of your takes goes to it; the network log shows every request. Audio is never sent, and API keys are kept in the macOS Keychain.
+- Otherwise the only network traffic is the speech model download, the language files macOS fetches for its own speech engine, and the releases page when you choose "Check for Updates". Offline mode blocks the downloads too.
 - No telemetry, no analytics, no crash reporting, no account.
 - Settings › Privacy shows a log of every download the app has made.
 
