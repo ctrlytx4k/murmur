@@ -101,6 +101,8 @@ enum Snapshots {
         add("onboarding-6-try-it", OnboardingView(stores: st, step: .tryIt))
         st = make(.idle, permissions: noAX)
         add("onboarding-3-accessibility-waiting", OnboardingView(stores: st, step: .accessibility))
+        st = make(.idle, permissions: PermissionSnapshot(microphone: true, accessibility: true, inputMonitoring: false))
+        add("onboarding-4-input-monitoring-waiting", OnboardingView(stores: st, step: .inputMonitoring))
         st = make(.idle)
         st.catalog.setStatus(.downloading(0.62), for: "parakeet-v3")
         st.catalog.languageStatus = .preparing

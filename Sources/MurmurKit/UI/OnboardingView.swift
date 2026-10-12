@@ -197,6 +197,10 @@ struct OnboardingView: View {
                         Text("turn on ") + Text("Murmur").fontWeight(.semibold).foregroundStyle(Tokens.labelSecondary)
                     }
                     .font(.mmSub).foregroundStyle(Tokens.labelTertiary)
+                    if permission == .inputMonitoring {
+                        Text("macOS may quit and reopen Murmur when you switch this on. That’s expected, and setup picks up right here.")
+                            .font(.mmSub).foregroundStyle(Tokens.labelSecondary).fixedSize(horizontal: false, vertical: true)
+                    }
                     if permission != .microphone {
                         // macOS ties these grants to the exact build. After a rebuild the switch still looks on but no longer counts.
                         Text("Already switched on? Select Murmur in that list, remove it with −, then add it again with +.")
