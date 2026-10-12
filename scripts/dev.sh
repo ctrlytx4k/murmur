@@ -24,6 +24,7 @@ bundle() {
   cp Support/Info.plist "$app/Contents/Info.plist"
   mkdir -p "$app/Contents/Resources"
   cp -R THIRD-PARTY-NOTICES.md Licenses "$app/Contents/Resources/"
+  cp Support/AppIcon.icns "$app/Contents/Resources/"
   # Local runs only; release signing is not set up yet. A self-signed "Murmur Local Dev"
   # certificate in the keychain keeps the signature the same across rebuilds, so macOS keeps the
   # Accessibility and Input Monitoring grants. Without one we fall back to ad-hoc.

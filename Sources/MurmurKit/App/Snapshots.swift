@@ -125,6 +125,16 @@ enum Snapshots {
         print("Wrote \(shots.count * 2) snapshots to \(directory.path)")
     }
 
+    /// The app icon as a 1024 px PNG: the same tile the interface draws, inside the usual margin.
+    static func renderIcon(to url: URL) {
+        _ = NSApplication.shared
+        let renderer = ImageRenderer(content: AppIconTile(size: 824).frame(width: 1024, height: 1024))
+        renderer.scale = 1
+        guard let image = renderer.cgImage else { return print("Could not draw the icon") }
+        try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: url)
+        print("Wrote \(url.path)")
+    }
+
     private static func write(_ view: some View, appearance: NSAppearance.Name, to url: URL) {
         let host = NSHostingView(rootView: view)
         let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -20_000, y: -20_000), size: host.fittingSize), styleMask: [.borderless], backing: .buffered, defer: false)
