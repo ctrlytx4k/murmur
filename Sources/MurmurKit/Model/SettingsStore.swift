@@ -144,6 +144,12 @@ public final class SettingsStore {
     public var meetingAudio: MeetingAudio { didSet { save(meetingAudio.rawValue, "meetingAudio") } }
     /// Tell the people on the call apart, once the speaker model is downloaded.
     public var meetingSpeakers: Bool { didSet { save(meetingSpeakers, "meetingSpeakers") } }
+    /// Offer to record when a call app starts using the microphone.
+    public var askWhenCallStarts: Bool { didSet { save(askWhenCallStarts, "askWhenCallStarts") } }
+    /// Call apps, by bundle identifier, that are recorded without asking.
+    public var alwaysRecordApps: [String] { didSet { save(alwaysRecordApps, "alwaysRecordApps") } }
+    /// Keep Murmur's main window out of screen shares, recordings and screenshots.
+    public var hidesMainWindowFromSharing: Bool { didSet { save(hidesMainWindowFromSharing, "hidesMainWindowFromSharing") } }
     /// Show a ready-made "I'm recording" note at the start of each meeting.
     public var meetingReminder: Bool { didSet { save(meetingReminder, "meetingReminder") } }
     public static let recordingNote = "Heads up: I’m recording this call to transcribe it on my Mac."
@@ -157,6 +163,7 @@ public final class SettingsStore {
     public var cycleModeShortcut: Shortcut { didSet { saveCodable(cycleModeShortcut, "cycleModeShortcut") } }
     public var reinsertShortcut: Shortcut { didSet { saveCodable(reinsertShortcut, "reinsertShortcut") } }
     public var historyShortcut: Shortcut { didSet { saveCodable(historyShortcut, "historyShortcut") } }
+    public var meetingShortcut: Shortcut { didSet { saveCodable(meetingShortcut, "meetingShortcut") } }
     /// Shortcuts the user chose to keep despite a system conflict, by spoken name.
     public var acceptedConflicts: [String] { didSet { save(acceptedConflicts, "acceptedConflicts") } }
 
@@ -234,6 +241,9 @@ public final class SettingsStore {
         askedForSystemAudio = bool("askedForSystemAudio", false)
         meetingSpeakers = bool("meetingSpeakers", true)
         meetingReminder = bool("meetingReminder", true)
+        askWhenCallStarts = bool("askWhenCallStarts", true)
+        alwaysRecordApps = defaults.stringArray(forKey: "alwaysRecordApps") ?? []
+        hidesMainWindowFromSharing = bool("hidesMainWindowFromSharing", false)
 
         shortcut = codable("shortcut", .rightOption)
         behavior = raw("behavior", .pushToTalk)
@@ -241,6 +251,7 @@ public final class SettingsStore {
         cycleModeShortcut = codable("cycleModeShortcut", Shortcut(keyCode: 46, modifiers: .option))
         reinsertShortcut = codable("reinsertShortcut", Shortcut(keyCode: 9, modifiers: [.control, .option]))
         historyShortcut = codable("historyShortcut", Shortcut(keyCode: 4, modifiers: [.control, .option]))
+        meetingShortcut = codable("meetingShortcut", HotkeyBindings.defaultMeeting)
         acceptedConflicts = defaults.stringArray(forKey: "acceptedConflicts") ?? []
 
         let savedMode: DictationMode = raw("mode", .raw)
@@ -278,9 +289,10 @@ public final class SettingsStore {
         overlay = OverlayAppearance(); accent = fresh.accent; appearance = fresh.appearance
         microphoneID = nil
         meetingSource = fresh.meetingSource; meetingAudio = fresh.meetingAudio; meetingSpeakers = fresh.meetingSpeakers; meetingReminder = fresh.meetingReminder
+        askWhenCallStarts = fresh.askWhenCallStarts; alwaysRecordApps = []; hidesMainWindowFromSharing = fresh.hidesMainWindowFromSharing
         shortcut = fresh.shortcut; behavior = fresh.behavior; doubleTapToLock = fresh.doubleTapToLock
         cycleModeShortcut = fresh.cycleModeShortcut; reinsertShortcut = fresh.reinsertShortcut
-        historyShortcut = fresh.historyShortcut; acceptedConflicts = []
+        historyShortcut = fresh.historyShortcut; meetingShortcut = fresh.meetingShortcut; acceptedConflicts = []
         mode = fresh.mode; modelID = fresh.modelID
         language = fresh.language
         cleanupEnabled = fresh.cleanupEnabled; cleanupPreset = fresh.cleanupPreset; customInstructions = ""; appPresets = []
@@ -321,7 +333,7 @@ public final class SettingsStore {
     }
 
     public var hotkeyBindings: HotkeyBindings {
-        HotkeyBindings(dictation: shortcut, cycleMode: cycleModeShortcut, reinsert: reinsertShortcut, history: historyShortcut, returnCommits: behavior == .toggle || shortcut.isDoubleTap)
+        HotkeyBindings(dictation: shortcut, cycleMode: cycleModeShortcut, reinsert: reinsertShortcut, history: historyShortcut, meeting: meetingShortcut, returnCommits: behavior == .toggle || shortcut.isDoubleTap)
     }
 
     private func save(_ value: Any?, _ key: String) { defaults.set(value, forKey: key) }

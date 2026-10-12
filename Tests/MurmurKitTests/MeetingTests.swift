@@ -48,6 +48,10 @@ private final class FakeMeetingAudio: MeetingAudioService {
 
     func stop() -> MeetingRecording { result }
     func requestSystemAudio() { asked += 1 }
+    var paused = false
+    var muted = false
+    func setPaused(_ paused: Bool) { self.paused = paused }
+    func setMicrophoneMuted(_ muted: Bool) { self.muted = muted }
 }
 
 @MainActor
@@ -153,6 +157,149 @@ private final class FakeMeetingAudio: MeetingAudioService {
             _ = try await MeetingTranscriber.transcribe(microphone: MeetingFakeTrack.of([(1, false), (2, true)]), call: nil, engine: engine, onProgress: { _ in })
         }
         #expect(engine.calls == 0)
+    }
+
+    // MARK: pause, mute, mark
+
+    @Test func pauseAndMuteReachTheRecorderAndResetForTheNextMeeting() async {
+        let rig = rig()
+        // Nothing to pause before a recording.
+        rig.controller.togglePause()
+        #expect(!rig.controller.isPaused && !rig.audio.paused)
+        rig.controller.start()
+        rig.controller.togglePause()
+        #expect(rig.controller.isPaused && rig.audio.paused && rig.controller.state.isRecording)
+        rig.controller.togglePause()
+        #expect(!rig.controller.isPaused && !rig.audio.paused)
+        rig.controller.toggleMute()
+        #expect(rig.controller.isMuted && rig.audio.muted && !rig.audio.paused)
+        rig.controller.stop()
+        await rig.controller.pendingWork?.value
+        #expect(!rig.controller.isMuted && !rig.controller.isPaused)
+        rig.controller.start()
+        #expect(!rig.controller.isMuted && !rig.controller.isPaused && rig.controller.markCount == 0)
+    }
+
+    @Test func aMarkedMomentFlagsTheLineBeingSaid() async {
+        var clock = Date(timeIntervalSince1970: 1_000)
+        let settings = SettingsStore(defaults: UserDefaults(suiteName: "murmur-tests-\(UUID().uuidString)")!)
+        let store = MeetingStore(directory: directory())
+        let controller = MeetingController(
+            audio: FakeMeetingAudio(), engine: MeetingFakeEngine(), store: store, settings: settings, permissions: DemoPermissions(),
+            openTrack: { url in url.lastPathComponent == "call.caf" ? MeetingFakeTrack.of([(5, false), (2, true), (1, false)]) : MeetingFakeTrack.of([(1, false), (2, true), (5, false)]) },
+            now: { clock })
+        controller.mark()
+        #expect(controller.markCount == 0)
+        controller.start()
+        // Six seconds in, while the call is speaking (it starts at about 5 s).
+        clock = clock.addingTimeInterval(6)
+        controller.mark()
+        #expect(controller.markCount == 1)
+        controller.stop()
+        await controller.pendingWork?.value
+        let meeting = store.meetings[0]
+        #expect(meeting.marks == [6] && meeting.lines.count == 2)
+        #expect(meeting.markedLines == [meeting.lines[1].id])
+        // The mark is a flag beside the transcript: the words are as transcribed.
+        #expect(meeting.lines[1].text.hasPrefix("um so"))
+        Accent.current = .ice
+    }
+
+    @Test func theShortcutStartsThenStopsAndTranscribes() async {
+        let rig = rig()
+        rig.controller.toggle()
+        #expect(rig.controller.state.isRecording)
+        rig.controller.toggle()
+        await rig.controller.pendingWork?.value
+        #expect(rig.controller.state == .idle && rig.store.meetings.count == 1 && rig.store.meetings[0].isTranscribed)
+        #expect(SettingsStore(defaults: UserDefaults(suiteName: "murmur-tests-\(UUID().uuidString)")!).hotkeyBindings.meeting == HotkeyBindings.defaultMeeting)
+        Accent.current = .ice
+    }
+
+    // MARK: a call starts
+
+    @Test func aCallAppStartingToListenIsOfferedOnce() {
+        let rig = rig()
+        rig.controller.microphoneUsers([])
+        #expect(rig.controller.detectedCall == nil)
+        // Zoom's helper process opens the microphone.
+        rig.controller.microphoneUsers(["us.zoom.xos.helper", "com.example.dictaphone"])
+        #expect(rig.controller.detectedCall == CallApp(bundleIdentifier: "us.zoom.xos", name: "Zoom", isBrowser: false))
+        #expect(rig.controller.state == .idle && rig.audio.started == nil)
+        // "Not Now" holds for the rest of that call, and the next call is offered again.
+        rig.controller.dismissDetectedCall()
+        rig.controller.microphoneUsers(["us.zoom.xos.helper"])
+        #expect(rig.controller.detectedCall == nil)
+        rig.controller.microphoneUsers([])
+        rig.controller.microphoneUsers(["us.zoom.xos"])
+        #expect(rig.controller.detectedCall?.name == "Zoom")
+        // The call ends before an answer: the offer goes away.
+        rig.controller.microphoneUsers([])
+        #expect(rig.controller.detectedCall == nil)
+    }
+
+    @Test func recordStartsTheMeetingAndAlwaysIsRemembered() {
+        let rig = rig()
+        rig.controller.microphoneUsers(["com.microsoft.teams2"])
+        rig.controller.recordDetectedCall()
+        #expect(rig.controller.state.isRecording && rig.controller.detectedCall == nil && rig.settings.alwaysRecordApps.isEmpty)
+        rig.controller.discard()
+        rig.controller.microphoneUsers([])
+
+        rig.controller.microphoneUsers(["com.microsoft.teams2"])
+        rig.controller.recordDetectedCall(always: true)
+        #expect(rig.settings.alwaysRecordApps == ["com.microsoft.teams"])
+        rig.controller.discard()
+        rig.controller.microphoneUsers([])
+        // From now on a Teams call records without asking.
+        rig.controller.microphoneUsers(["com.microsoft.teams2"])
+        #expect(rig.controller.state.isRecording && rig.controller.detectedCall == nil)
+    }
+
+    @Test func nothingIsOfferedWhenAskingIsOffOrWhileAlreadyRecording() {
+        let off = rig()
+        off.settings.askWhenCallStarts = false
+        off.controller.microphoneUsers(["us.zoom.xos"])
+        #expect(off.controller.detectedCall == nil && off.controller.state == .idle)
+
+        let busy = rig()
+        busy.controller.start()
+        busy.controller.microphoneUsers(["us.zoom.xos"])
+        #expect(busy.controller.detectedCall == nil)
+
+        // A browser is named for what is known: it is using the microphone. A call app wins over it.
+        let both = rig()
+        both.controller.microphoneUsers(["com.google.Chrome.helper", "com.tinyspeck.slackmacgap.helper"])
+        #expect(both.controller.detectedCall?.name == "Slack")
+        #expect(CallApp.matching("com.google.Chrome.helper")?.isBrowser == true && CallApp.matching("com.apple.Notes") == nil)
+    }
+
+    // MARK: echo
+
+    @Test func aYouLineThatOnlyRepeatsTheCallIsLeftOutAndSaidSo() async throws {
+        #expect(EchoFilter.isEcho(microphone: "yes the language step is good but", call: "Yes. The language step is good, but the engine step feels heavy."))
+        #expect(!EchoFilter.isEcho(microphone: "I disagree, we should ship on Friday instead", call: "Yes. The language step is good, but the engine step feels heavy."))
+        // Short agreement is never treated as echo.
+        #expect(!EchoFilter.isEcho(microphone: "Yes, okay.", call: "Yes, okay."))
+
+        final class Scripted: TranscriptionEngine {
+            let displayName = "scripted"
+            // The clip's first sample is its start time (see MeetingFakeTrack).
+            func transcribe(_ clip: AudioClip) async throws -> String {
+                switch Int((clip.samples.first ?? 0).rounded()) {
+                case 1: "I think we should start with onboarding today"
+                case 5, 6: "the engine step feels heavy for new users"
+                default: "sounds good to me let us do that"
+                }
+            }
+        }
+        // The microphone hears you at 1 s, then the speakers at about 6 s, then you again at 12 s.
+        let result = try await MeetingTranscriber.transcribe(
+            microphone: MeetingFakeTrack.of([(1, false), (2, true), (3, false), (2, true), (4, false), (2, true), (1, false)]),
+            call: MeetingFakeTrack.of([(5, false), (3, true), (7, false)]), engine: Scripted(), onProgress: { _ in })
+        #expect(result.lines.map(\.speaker) == [.you, .others, .you])
+        #expect(result.lines.map(\.text) == ["I think we should start with onboarding today", "the engine step feels heavy for new users", "sounds good to me let us do that"])
+        #expect(result.note?.hasPrefix("1 line your microphone picked up from the speakers was left out") == true)
     }
 
     // MARK: speakers

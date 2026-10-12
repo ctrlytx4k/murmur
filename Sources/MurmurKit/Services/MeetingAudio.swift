@@ -16,6 +16,7 @@ private nonisolated final class TrackWriter: @unchecked Sendable {
     private var buffers = 0
     private var unreadable = 0
     private var sourceFormat = ""
+    private var held = false
     private let started = ProcessInfo.processInfo.systemUptime
     private let report: (@Sendable (Float) -> Void)?
 
@@ -35,11 +36,19 @@ private nonisolated final class TrackWriter: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Held: what arrives is thrown away. When it is released the clock has moved on, and the gap is written as silence.
+    func setHeld(_ held: Bool) {
+        lock.lock()
+        self.held = held
+        lock.unlock()
+    }
+
     func write(_ buffer: AVAudioPCMBuffer) {
         guard buffer.frameLength > 0, let mono = Self.mono(buffer) else { return noteUnreadable() }
         lock.lock()
         defer { lock.unlock() }
         buffers += 1
+        if held { return }
         if sourceFormat.isEmpty {
             sourceFormat = "\(Int(buffer.format.sampleRate)) Hz, \(buffer.format.channelCount) ch\(buffer.format.isInterleaved ? ", interleaved" : "")"
         }
@@ -278,11 +287,30 @@ public final class LiveMeetingAudio: MeetingAudioService {
     private var configObserver: NSObjectProtocol?
     private var restartPending = false
     private var onLevel: ((Float) -> Void)?
+    private var paused = false
+    private var muted = false
 
     public init() {}
 
+    public func setPaused(_ paused: Bool) {
+        self.paused = paused
+        applyHolds()
+    }
+
+    public func setMicrophoneMuted(_ muted: Bool) {
+        self.muted = muted
+        applyHolds()
+    }
+
+    private func applyHolds() {
+        microphone?.setHeld(paused || muted)
+        call?.setHeld(paused)
+    }
+
     public func start(microphone url: URL, call callURL: URL?, microphoneID: String?, onLevel: @escaping (Float) -> Void) throws {
         _ = stop()
+        paused = false
+        muted = false
         self.onLevel = onLevel
         let writer = try TrackWriter(url: url) { [weak self] level in
             Task { @MainActor in self?.onLevel?(level) }

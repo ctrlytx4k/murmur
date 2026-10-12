@@ -25,6 +25,8 @@ public nonisolated enum HotkeyEvent: Sendable {
 
 public nonisolated enum HotkeyAction: Equatable, Sendable {
     case cycleMode, reinsertLast, openHistory
+    /// Start recording a meeting, or stop and transcribe the one in progress.
+    case toggleMeeting
     /// ⌥1, ⌥2 while recording: the mode at that position in the overlay's menu.
     case selectMode(Int)
 }
@@ -34,14 +36,18 @@ public nonisolated struct HotkeyBindings: Equatable, Sendable {
     public var cycleMode: Shortcut
     public var reinsert: Shortcut
     public var history: Shortcut
+    public var meeting: Shortcut
     /// Toggle mode: Return ends the take.
     public var returnCommits: Bool
 
-    public init(dictation: Shortcut, cycleMode: Shortcut, reinsert: Shortcut, history: Shortcut, returnCommits: Bool) {
+    public static let defaultMeeting = Shortcut(keyCode: 46, modifiers: [.control, .option])
+
+    public init(dictation: Shortcut, cycleMode: Shortcut, reinsert: Shortcut, history: Shortcut, meeting: Shortcut = HotkeyBindings.defaultMeeting, returnCommits: Bool) {
         self.dictation = dictation
         self.cycleMode = cycleMode
         self.reinsert = reinsert
         self.history = history
+        self.meeting = meeting
         self.returnCommits = returnCommits
     }
 }

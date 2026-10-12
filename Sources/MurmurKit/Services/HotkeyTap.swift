@@ -66,7 +66,7 @@ nonisolated enum HotkeyDecision {
                 return (.event(.down), true)
             }
             guard !autorepeat else { return (nil, false) }
-            for (shortcut, action) in [(bindings.cycleMode, HotkeyAction.cycleMode), (bindings.reinsert, .reinsertLast), (bindings.history, .openHistory)] {
+            for (shortcut, action) in [(bindings.cycleMode, HotkeyAction.cycleMode), (bindings.reinsert, .reinsertLast), (bindings.history, .openHistory), (bindings.meeting, .toggleMeeting)] {
                 if !shortcut.isModifierOnly, keyCode == shortcut.keyCode, modifiers == shortcut.modifiers { return (.action(action), true) }
             }
         case .keyUp:

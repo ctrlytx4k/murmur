@@ -94,6 +94,8 @@ public nonisolated struct Meeting: Codable, Equatable, Identifiable, Sendable {
     public var summary: MeetingSummary?
     /// Names the user gave the voices on the call, by voice number. Labels only: the transcript's words never change.
     public var speakerNames: [String: String]?
+    /// Moments the user marked while recording, in seconds from the start.
+    public var marks: [Double]?
 
     public init(id: UUID = UUID(), title: String, date: Date, duration: TimeInterval, includesCallAudio: Bool) {
         self.id = id
@@ -120,6 +122,16 @@ public nonisolated struct Meeting: Codable, Equatable, Identifiable, Sendable {
         guard let speaker = line.speaker else { return nil }
         guard speaker == .others, let voice = line.voice else { return speaker.label }
         return speakerNames?[String(voice)] ?? "Speaker \(voice)"
+    }
+
+    /// The lines being said when the user pressed "Mark this moment".
+    public var markedLines: Set<UUID> {
+        var marked: Set<UUID> = []
+        for mark in marks ?? [] {
+            // The press comes a moment after the words, so the line is the last one that had started by then.
+            if let line = lines.last(where: { $0.start <= mark }) ?? lines.first { marked.insert(line.id) }
+        }
+        return marked
     }
 
     /// How many different voices were heard on the call.
@@ -276,6 +288,63 @@ public protocol MeetingAudioService: AnyObject {
     func stop() -> MeetingRecording
     /// Makes macOS show its System Audio Recording prompt, if it has not been answered yet.
     func requestSystemAudio()
+    /// Paused: nothing is recorded from either side until it is resumed. The gap stays in the timeline as silence.
+    func setPaused(_ paused: Bool)
+    /// Muted: the call is still recorded, your microphone is not.
+    func setMicrophoneMuted(_ muted: Bool)
+}
+
+public extension MeetingAudioService {
+    func setPaused(_ paused: Bool) {}
+    func setMicrophoneMuted(_ muted: Bool) {}
+}
+
+/// An app that people take calls in.
+public nonisolated struct CallApp: Equatable, Sendable {
+    public var bundleIdentifier: String
+    public var name: String
+    /// A browser: it might be a call, it might be any page that listens.
+    public var isBrowser: Bool
+
+    static let known: [(prefix: String, name: String, isBrowser: Bool)] = [
+        ("us.zoom.xos", "Zoom", false), ("com.microsoft.teams", "Teams", false), ("com.apple.FaceTime", "FaceTime", false),
+        // FaceTime's audio runs in a system process that holds the microphone at other times too, so that process is not listed.
+        ("com.tinyspeck.slackmacgap", "Slack", false), ("com.hnc.Discord", "Discord", false),
+        ("com.cisco.webexmeetingsapp", "Webex", false), ("Cisco-Systems.Spark", "Webex", false), ("net.whatsapp.WhatsApp", "WhatsApp", false),
+        ("com.google.Chrome", "Chrome", true), ("com.apple.WebKit.GPU", "Safari", true), ("com.apple.Safari", "Safari", true),
+        ("org.mozilla.firefox", "Firefox", true), ("com.microsoft.edgemac", "Edge", true), ("company.thebrowser.Browser", "Arc", true),
+        ("com.brave.Browser", "Brave", true),
+    ]
+
+    /// The call app a process belongs to, if it is one. Helper processes count as their app.
+    public static func matching(_ bundleIdentifier: String) -> CallApp? {
+        known.first { bundleIdentifier.hasPrefix($0.prefix) }.map { CallApp(bundleIdentifier: $0.prefix, name: $0.name, isBrowser: $0.isBrowser) }
+    }
+
+    public static func name(for bundleIdentifier: String) -> String { matching(bundleIdentifier)?.name ?? bundleIdentifier }
+}
+
+/// Words the microphone picked up from the Mac's own speakers. With headphones there are none; without them
+/// the other people's words would otherwise appear twice, once under "You".
+public nonisolated enum EchoFilter {
+    static func words(_ text: String) -> [String] {
+        text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+    }
+
+    /// True when nearly everything in a microphone line was also said on the call at the same time.
+    /// Short lines are never treated as echo: "yes" and "okay" are said by everyone.
+    public static func isEcho(microphone: String, call: String) -> Bool {
+        let mine = words(microphone)
+        guard mine.count >= 4 else { return false }
+        var theirs: [String: Int] = [:]
+        for word in words(call) { theirs[word, default: 0] += 1 }
+        var shared = 0
+        for word in mine where (theirs[word] ?? 0) > 0 {
+            theirs[word]! -= 1
+            shared += 1
+        }
+        return Double(shared) / Double(mine.count) >= 0.75
+    }
 }
 
 /// One recorded track, read back for transcription a piece at a time. Reading happens off the main actor.
@@ -373,17 +442,30 @@ public enum MeetingTranscriber {
 
         let total = jobs.reduce(0) { $0 + ($1.range.upperBound - $1.range.lowerBound) }
         var done = 0.0
-        var lines: [MeetingLine] = []
+        var heard: [(line: MeetingLine, range: ClosedRange<Double>)] = []
         onProgress(0)
         for job in jobs {
             try Task.checkCancellation()
             let clip = try await job.track.clip(from: job.range.lowerBound, to: job.range.upperBound)
             let text = try await engine.transcribe(clip).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty { lines.append(MeetingLine(start: job.range.lowerBound, speaker: job.speaker, voice: job.voice, text: text)) }
+            if !text.isEmpty { heard.append((MeetingLine(start: job.range.lowerBound, speaker: job.speaker, voice: job.voice, text: text), job.range)) }
             done += job.range.upperBound - job.range.lowerBound
             onProgress(total > 0 ? done / total : 1)
         }
+        // Without headphones the microphone hears the call too. A "You" line that only repeats what the call
+        // was saying at that moment is the speakers, not you, and is left out.
+        var echoes = 0
+        let lines = heard.compactMap { entry -> MeetingLine? in
+            guard entry.line.speaker == .you else { return entry.line }
+            let nearby = heard.filter { $0.line.speaker == .others && $0.range.lowerBound <= entry.range.upperBound + 1.5 && $0.range.upperBound >= entry.range.lowerBound - 1.5 }
+            guard !nearby.isEmpty, EchoFilter.isEcho(microphone: entry.line.text, call: nearby.map(\.line.text).joined(separator: " ")) else { return entry.line }
+            echoes += 1
+            return nil
+        }
         var note: String?
+        if echoes > 0 {
+            note = "\(echoes) \(echoes == 1 ? "line" : "lines") your microphone picked up from the speakers \(echoes == 1 ? "was" : "were") left out of “You”. Headphones avoid this."
+        }
         if callWasSilent {
             note = "No call audio was heard, so only your microphone is here. If other people spoke, check System Audio Recording in System Settings › Privacy & Security."
         } else if lines.isEmpty {

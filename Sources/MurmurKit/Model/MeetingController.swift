@@ -26,6 +26,14 @@ public final class MeetingController {
     public private(set) var microphoneAllowed: Bool
     /// True during the first part of transcribing a call, while the voices on it are being told apart.
     public private(set) var isSeparatingSpeakers = false
+    /// Paused: nothing is being recorded until it is resumed.
+    public private(set) var isPaused = false
+    /// Your microphone is left out; the call is still recorded.
+    public private(set) var isMuted = false
+    /// How many moments have been marked in this recording.
+    public private(set) var markCount = 0
+    /// A call app that just started using the microphone, waiting for "Record" or "Not Now".
+    public private(set) var detectedCall: CallApp?
 
     @ObservationIgnored private let audio: any MeetingAudioService
     @ObservationIgnored private let engine: any TranscriptionEngine
@@ -38,6 +46,9 @@ public final class MeetingController {
     @ObservationIgnored private var recordingID: UUID?
     @ObservationIgnored private var recordingCall = false
     @ObservationIgnored private var silentCalls: Set<UUID> = []
+    @ObservationIgnored private var marks: [Double] = []
+    @ObservationIgnored private var callApps: Set<String> = []
+    @ObservationIgnored private var declinedCalls: Set<String> = []
     /// The transcription in flight. Tests await it.
     @ObservationIgnored public private(set) var pendingWork: Task<Void, Never>?
 
@@ -85,7 +96,10 @@ public final class MeetingController {
             try audio.start(
                 microphone: store.microphoneURL(for: id), call: withCall ? store.callURL(for: id) : nil,
                 microphoneID: settings.microphoneID
-            ) { [weak self] level in self?.level = level }
+            ) { [weak self] level in
+                guard let self, !self.isPaused, !self.isMuted else { return }
+                self.level = level
+            }
         } catch {
             try? FileManager.default.removeItem(at: store.folder(for: id))
             problem = "Couldn’t start recording: \(error.localizedDescription)"
@@ -96,8 +110,78 @@ public final class MeetingController {
         problem = nil
         recordingID = id
         recordingCall = withCall
+        marks = []
+        markCount = 0
+        isPaused = false
+        isMuted = false
+        detectedCall = nil
         state = .recording(since: now())
         DebugLog.log("meeting: recording, call audio \(withCall)")
+    }
+
+    /// The meeting shortcut: start when idle, stop and transcribe when recording.
+    public func toggle() {
+        if state.isRecording { stop() } else { start() }
+    }
+
+    public func togglePause() {
+        guard state.isRecording else { return }
+        isPaused.toggle()
+        audio.setPaused(isPaused)
+        if isPaused { level = 0 }
+        DebugLog.log("meeting: \(isPaused ? "paused" : "resumed")")
+    }
+
+    public func toggleMute() {
+        guard state.isRecording else { return }
+        isMuted.toggle()
+        audio.setMicrophoneMuted(isMuted)
+        if isMuted { level = 0 }
+        DebugLog.log("meeting: microphone \(isMuted ? "muted" : "unmuted")")
+    }
+
+    /// Mark this moment: the line being said is flagged in the transcript.
+    public func mark() {
+        guard case .recording(let since) = state else { return }
+        marks.append(max(0, now().timeIntervalSince(since)))
+        markCount = marks.count
+    }
+
+    // MARK: a call starts
+
+    /// Told, every few seconds, which apps are using the microphone. A call app that has just started is offered
+    /// for recording once; "Not Now" holds until that app lets go of the microphone.
+    public func microphoneUsers(_ bundleIdentifiers: Set<String>) {
+        let apps = Set(bundleIdentifiers.compactMap { CallApp.matching($0)?.bundleIdentifier })
+        let started = apps.subtracting(callApps)
+        callApps = apps
+        declinedCalls.formIntersection(apps)
+        if let waiting = detectedCall, !apps.contains(waiting.bundleIdentifier) { detectedCall = nil }
+        guard settings.askWhenCallStarts, state.isIdle, detectedCall == nil else { return }
+        // A real call app is offered ahead of a browser that happens to start listening at the same moment.
+        let fresh = started.subtracting(declinedCalls).compactMap(CallApp.matching).sorted { !$0.isBrowser && $1.isBrowser }
+        guard let app = fresh.first else { return }
+        if settings.alwaysRecordApps.contains(app.bundleIdentifier) {
+            DebugLog.log("meeting: \(app.name) started a call, recording as always")
+            start()
+        } else {
+            detectedCall = app
+        }
+    }
+
+    /// "Record", or "Always for Zoom".
+    public func recordDetectedCall(always: Bool = false) {
+        guard let app = detectedCall else { return }
+        if always, !settings.alwaysRecordApps.contains(app.bundleIdentifier) { settings.alwaysRecordApps.append(app.bundleIdentifier) }
+        detectedCall = nil
+        start()
+    }
+
+    /// "Not Now": no more asking for this call.
+    public func dismissDetectedCall() {
+        guard let app = detectedCall else { return }
+        declinedCalls.insert(app.bundleIdentifier)
+        detectedCall = nil
     }
 
     /// Stop & Transcribe. The meeting is saved first, so a failed transcription never loses the recording.
@@ -118,6 +202,8 @@ public final class MeetingController {
         try? FileManager.default.removeItem(at: store.folder(for: id))
         recordingID = nil
         level = 0
+        isPaused = false
+        isMuted = false
         state = .idle
         DebugLog.log("meeting: discarded")
     }
@@ -129,7 +215,11 @@ public final class MeetingController {
         level = 0
         if recording.callWasSilent { silentCalls.insert(id) }
         let title = "Meeting, \(since.formatted(date: .omitted, time: .shortened))"
-        store.add(Meeting(id: id, title: title, date: since, duration: recording.duration, includesCallAudio: recordingCall))
+        var meeting = Meeting(id: id, title: title, date: since, duration: recording.duration, includesCallAudio: recordingCall)
+        if !marks.isEmpty { meeting.marks = marks }
+        store.add(meeting)
+        isPaused = false
+        isMuted = false
         latest = id
         state = .idle
         DebugLog.log("meeting: stopped after \(Int(recording.duration)) s, call silent \(recording.callWasSilent)")
