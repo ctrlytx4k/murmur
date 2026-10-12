@@ -231,7 +231,8 @@ struct Waveform: View {
             }
         }
         .frame(height: maxHeight)
-        .frame(maxWidth: .infinity, alignment: .trailing)
+        // Narrower than its bars, it keeps the newest ones.
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .trailing)
         .clipped()
         .accessibilityHidden(true)
     }

@@ -1,25 +1,71 @@
 import AppKit
 import SwiftUI
 
+/// A made-up take for the preview in Settings › Overlay: the real card, fed sample words and levels.
+struct OverlaySample: Equatable {
+    static let sentence = "we’re shipping the beta on Friday and collecting feedback"
+    static let target = TargetApp(name: "Notes", bundleIdentifier: "com.apple.Notes")
+
+    var text = OverlaySample.sentence
+    var levels: [Float] = (0..<DictationController.levelCount).map { i in
+        let r = Float((i * 7919 + 13) % 100) / 100
+        return r < 0.4 ? 0 : r * r * (0.3 + 0.7 * min(1, Float(i) / 34))
+    }
+    var elapsed = 4
+
+    /// The whole sentence and a still waveform: what Reduce Motion and snapshots show.
+    static let finished = OverlaySample()
+}
+
 /// The glass card that follows a take: listening, transcribing, inserted, or what went wrong.
 /// It shows where the text is going and never takes focus.
 struct OverlayView: View {
     let stores: Stores
+    /// Set only by the preview in Settings: the card then shows this instead of a real take.
+    var sample: OverlaySample? = nil
     @Environment(\.appActions) private var actions
 
     private var controller: DictationController { stores.controller }
     private var settings: SettingsStore { stores.settings }
-    private var panels: OverlayPanelState { stores.overlay }
+    private var panels: OverlayPanelState { sample == nil ? stores.overlay : Self.previewPanels }
+    private static let previewPanels = OverlayPanelState()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private var cleaning: Bool { controller.cleanupDestination != nil && controller.cleanupAvailability.isAvailable }
+    @Environment(\.colorScheme) private var inherited
+    @Environment(\.flatGlass) private var isSnapshot
+    private var cleaning: Bool { destination != nil && controller.cleanupAvailability.isAvailable }
+    private var destination: CleanupDestination? { sample == nil ? controller.cleanupDestination : nil }
     /// The cloud provider this take's text will go to, if any.
-    private var cloudName: String? { controller.cleanupDestination?.cloudName }
+    private var cloudName: String? { destination?.cloudName }
     /// Why a take is staying on this Mac although a cloud provider is selected.
-    private var stayingLocal: String? { if case .thisMac(let reason?) = controller.cleanupDestination { reason } else { nil } }
+    private var stayingLocal: String? { if case .thisMac(let reason?) = destination { reason } else { nil } }
+
+    private var state: DictationState { sample == nil ? controller.state : .recording(since: .distantPast) }
+    private var target: TargetApp? { sample == nil ? controller.target : OverlaySample.target }
+    private var levels: [Float] { sample?.levels ?? controller.levels }
+    private var isSilent: Bool { sample == nil && controller.isSilent }
+    private var deviceNotice: String? { sample == nil ? controller.deviceNotice : nil }
+
+    private var appearance: OverlayAppearance { settings.overlay }
+    /// A compact card has no room for a panel or a warning, so it opens up to the regular card while one shows.
+    private var listeningCard: OverlayAppearance {
+        var card = appearance
+        if card.size == .compact, panels.open != nil || isSilent || deviceNotice != nil { card.size = .regular }
+        return card
+    }
+    /// Cards that carry a message are never narrower than the regular card.
+    private var messageWidth: CGFloat { max(appearance.size.cardWidth, OverlayAppearance.Size.regular.cardWidth) }
+    private var scheme: ColorScheme {
+        switch appearance.cardScheme {
+        // A snapshot is drawn in the appearance it is asked for, not this Mac's.
+        case .matchMac: isSnapshot ? inherited : (DisplayOptions.shared.systemIsDark ? .dark : .light)
+        case .light: .light
+        case .dark: .dark
+        }
+    }
 
     var body: some View {
         Group {
-            switch controller.state {
+            switch state {
             case .recording(let since): listening(since: since)
             case .processing: processing
             case .inserted(let summary): inserted(summary)
@@ -29,15 +75,58 @@ struct OverlayView: View {
             }
         }
         .foregroundStyle(Tokens.label)
+        // Only the card changes appearance; Murmur's windows keep their own.
+        .environment(\.colorScheme, scheme)
         .id(settings.accent)
+    }
+
+    private func surface<S: InsettableShape>(_ shape: S) -> OverlayMaterial<S> { OverlayMaterial(appearance: appearance, shape: shape) }
+    private func cardSurface(_ cornerRadius: CGFloat = Tokens.Radius.overlay) -> OverlayMaterial<RoundedRectangle> {
+        surface(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 
     // MARK: listening
 
     private func listening(since: Date) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let card = listeningCard
+        return Group {
+            if card.size == .compact {
+                compactListening(since: since, shown: card.elements)
+            } else {
+                fullListening(since: since, card: card)
+            }
+        }
+        .background(GeometryReader { geo in
+            Color.clear.onChange(of: geo.frame(in: .global), initial: true) { _, frame in panels.cardFrame = frame }
+        })
+        // The height settles without a bounce. With Reduce Motion it does not animate: the body just crossfades.
+        .animation(reduceMotion ? nil : .spring(duration: 0.22, bounce: 0), value: panels.open)
+        .onChange(of: panels.open) { old, new in
+            let name = (new ?? old) == .mode ? "Mode" : "Actions"
+            AccessibilityNotification.Announcement("\(name), \(new == nil ? "collapsed" : "expanded")").post()
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Murmur is listening. Text will go into \(target?.name ?? "the front app").")
+    }
+
+    /// One row: the dot, the waveform, the timer and the mode.
+    private func compactListening(since: Date, shown: OverlayAppearance.Elements) -> some View {
+        HStack(spacing: 10) {
+            PulseDot()
+            Waveform(levels: levels)
+            if shown.contains(.timer) { timer(since: since) }
+            modePill
+        }
+        .padding(EdgeInsets(top: 9, leading: 14, bottom: 9, trailing: 10))
+        .frame(width: OverlayAppearance.Size.compact.cardWidth)
+        .modifier(cardSurface(20))
+    }
+
+    private func fullListening(since: Date, card: OverlayAppearance) -> some View {
+        let shown = card.elements
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
-                targetLabel
+                if shown.contains(.targetApp) { targetLabel }
                 destinationChip
                 Spacer()
                 modePill
@@ -46,7 +135,7 @@ struct OverlayView: View {
             .frame(height: 26)
             .padding(EdgeInsets(top: 10, leading: 12, bottom: 0, trailing: 10))
 
-            if let notice = controller.deviceNotice {
+            if let notice = deviceNotice {
                 HStack(spacing: 10) {
                     Image(systemName: "mic.slash").font(.system(size: 12, weight: .medium)).foregroundStyle(Tokens.warning)
                     Text(notice).font(.system(size: 12.5)).fixedSize(horizontal: false, vertical: true)
@@ -62,7 +151,7 @@ struct OverlayView: View {
                 switch panels.open {
                 case .mode: modePanel
                 case .actions: actionsPanel
-                case nil: listeningBody
+                case nil: listeningBody(card)
                 }
             }
             .transition(.opacity.animation(.easeOut(duration: reduceMotion ? 0.1 : 0.15)))
@@ -70,33 +159,31 @@ struct OverlayView: View {
             .animation(reduceMotion ? .easeOut(duration: 0.1) : nil, value: panels.open)
 
             HStack(spacing: 10) {
-                PulseDot(pulsing: !controller.isSilent)
-                Waveform(levels: controller.levels, color: controller.isSilent ? Tokens.warning : Tokens.label)
-                ElapsedTime(since: since).font(.mmMono).foregroundStyle(Tokens.labelTertiary)
-                HStack(spacing: 4) {
-                    hintKey("esc")
-                    if settings.behavior == .toggle || controller.isLatched || settings.shortcut.isDoubleTap { hintKey("↩") }
+                PulseDot(pulsing: !isSilent)
+                Waveform(levels: levels, color: isSilent ? Tokens.warning : Tokens.label)
+                if shown.contains(.timer) { timer(since: since) }
+                if shown.contains(.keyHints) {
+                    HStack(spacing: 4) {
+                        hintKey("esc")
+                        if sample != nil || settings.behavior == .toggle || controller.isLatched || settings.shortcut.isDoubleTap { hintKey("↩") }
+                    }
                 }
             }
             .padding(EdgeInsets(top: 6, leading: 16, bottom: 12, trailing: 12))
         }
-        .frame(width: 400)
-        .glassSurface(cornerRadius: Tokens.Radius.overlay)
-        .background(GeometryReader { geo in
-            Color.clear.onChange(of: geo.frame(in: .global), initial: true) { _, frame in panels.cardFrame = frame }
-        })
-        // The height settles without a bounce. With Reduce Motion it does not animate: the body just crossfades.
-        .animation(reduceMotion ? nil : .spring(duration: 0.22, bounce: 0), value: panels.open)
-        .onChange(of: panels.open) { old, new in
-            let name = (new ?? old) == .mode ? "Mode" : "Actions"
-            AccessibilityNotification.Announcement("\(name), \(new == nil ? "collapsed" : "expanded")").post()
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Murmur is listening. Text will go into \(controller.target?.name ?? "the front app").")
+        .frame(width: card.size.cardWidth)
+        .modifier(cardSurface())
     }
 
-    @ViewBuilder private var listeningBody: some View {
-        if controller.isSilent {
+    @ViewBuilder private func timer(since: Date) -> some View {
+        Group {
+            if let sample { Text("0:\(String(format: "%02d", sample.elapsed))") } else { ElapsedTime(since: since) }
+        }
+        .font(.mmMono).foregroundStyle(Tokens.labelTertiary)
+    }
+
+    @ViewBuilder private func listeningBody(_ card: OverlayAppearance) -> some View {
+        if isSilent {
             HStack(spacing: 10) {
                 Image(systemName: "mic.slash").font(.system(size: 13, weight: .medium)).foregroundStyle(Tokens.warning)
                 VStack(alignment: .leading, spacing: 0) {
@@ -108,9 +195,18 @@ struct OverlayView: View {
             .padding(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
             .background(Tokens.warningSoft, in: RoundedRectangle(cornerRadius: Tokens.Radius.card, style: .continuous))
             .padding(EdgeInsets(top: 10, leading: 10, bottom: 4, trailing: 10))
+        } else if !card.elements.contains(.transcript) {
+            Color.clear.frame(height: 4)
+        } else if let sample {
+            // The whole sentence holds the height, so the card does not grow while the words arrive.
+            Text(OverlaySample.sentence).hidden()
+                .overlay(alignment: .topLeading) { Text(sample.text) }
+                .font(.system(size: card.size.textSize)).lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading).foregroundStyle(Tokens.labelSecondary)
+                .padding(EdgeInsets(top: 10, leading: 16, bottom: 4, trailing: 16))
         } else {
             Text(controller.isLatched || settings.shortcut.isDoubleTap ? "Listening… \(settings.shortcut.keycaps.joined(separator: " ")) again to insert" : "Listening…")
-                .font(.mmTranscript).lineLimit(1).truncationMode(.tail)
+                .font(.system(size: card.size.textSize)).lineLimit(1).truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading).foregroundStyle(Tokens.labelSecondary)
                 .padding(EdgeInsets(top: 10, leading: 16, bottom: 4, trailing: 16))
         }
@@ -119,22 +215,37 @@ struct OverlayView: View {
     // MARK: processing
 
     private var processing: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                targetLabel
-                Spacer()
-                Spinner(color: cloudName == nil ? Tokens.accentText : Tokens.warning)
-                Text(cloudName.map { "Cleaning up with \($0)…" } ?? stayingLocal.map { "\($0) · cleaning up here…" } ?? (cleaning ? "Cleaning up…" : "Transcribing…"))
-                    .font(.mmSub).foregroundStyle(Tokens.labelTertiary).lineLimit(1)
-            }
-            .frame(height: 26)
-            .padding(EdgeInsets(top: 10, leading: 12, bottom: 0, trailing: 14))
-            Sweep()
-                .frame(height: 21)
-                .padding(EdgeInsets(top: 10, leading: 16, bottom: 14, trailing: 16))
+        let status = HStack(spacing: 6) {
+            Spinner(color: cloudName == nil ? Tokens.accentText : Tokens.warning)
+            Text(cloudName.map { "Cleaning up with \($0)…" } ?? stayingLocal.map { "\($0) · cleaning up here…" } ?? (cleaning ? "Cleaning up…" : "Transcribing…"))
+                .font(.mmSub).foregroundStyle(Tokens.labelTertiary).lineLimit(1)
         }
-        .frame(width: 400)
-        .glassSurface(cornerRadius: Tokens.Radius.overlay)
+        return Group {
+            if appearance.size == .compact {
+                HStack(spacing: 10) {
+                    status
+                    Sweep().frame(height: 21)
+                }
+                .padding(EdgeInsets(top: 9, leading: 14, bottom: 9, trailing: 14))
+                .frame(width: appearance.size.cardWidth)
+                .modifier(cardSurface(20))
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 6) {
+                        if appearance.showTargetApp { targetLabel }
+                        Spacer()
+                        status
+                    }
+                    .frame(height: 26)
+                    .padding(EdgeInsets(top: 10, leading: 12, bottom: 0, trailing: 14))
+                    Sweep()
+                        .frame(height: 21)
+                        .padding(EdgeInsets(top: 10, leading: 16, bottom: 14, trailing: 16))
+                }
+                .frame(width: appearance.size.cardWidth)
+                .modifier(cardSurface())
+            }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(cloudName.map { "Transcribing, then cleaning up with \($0)" } ?? "Transcribing")
     }
@@ -161,7 +272,7 @@ struct OverlayView: View {
         }
         .padding(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 16))
         .frame(height: 46)
-        .glassPill()
+        .modifier(surface(Pill()))
         .accessibilityElement(children: .combine)
     }
 
@@ -192,8 +303,8 @@ struct OverlayView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(EdgeInsets(top: 8, leading: 16, bottom: 14, trailing: 16))
         }
-        .frame(width: 400)
-        .glassSurface(cornerRadius: Tokens.Radius.overlay)
+        .frame(width: messageWidth)
+        .modifier(cardSurface())
         .accessibilityElement(children: .combine)
     }
 
@@ -225,8 +336,8 @@ struct OverlayView: View {
             }
             .padding(EdgeInsets(top: 6, leading: 12, bottom: 12, trailing: 12))
         }
-        .frame(width: 400)
-        .glassSurface(cornerRadius: Tokens.Radius.overlay)
+        .frame(width: messageWidth)
+        .modifier(cardSurface())
     }
 
     // MARK: pieces
@@ -248,6 +359,8 @@ struct OverlayView: View {
             .contentShape(Pill())
         }
         .buttonStyle(.plain).fixedSize()
+        // The preview in Settings is a picture of the card: nothing in it takes keyboard focus.
+        .focusable(sample == nil)
         .accessibilityLabel("Mode, \(settings.mode.label)")
         .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
     }
@@ -265,6 +378,7 @@ struct OverlayView: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain).fixedSize()
+        .focusable(sample == nil)
         .accessibilityLabel(isOpen ? "Close" : "More actions")
     }
 
@@ -407,7 +521,7 @@ struct OverlayView: View {
 
     /// Where this take's text is going for clean-up, whenever that is not simply "this Mac, as always".
     @ViewBuilder private var destinationChip: some View {
-        switch controller.cleanupDestination {
+        switch destination {
         case .cloud(let name):
             HStack(spacing: 4) {
                 Image(systemName: "cloud").font(.system(size: 9, weight: .bold))
@@ -429,12 +543,12 @@ struct OverlayView: View {
 
     private var targetLabel: some View {
         HStack(spacing: 7) {
-            if let icon = controller.target?.bundleIdentifier.flatMap({ AppIcons.icon(forBundleIdentifier: $0) }) {
+            if let icon = target?.bundleIdentifier.flatMap({ AppIcons.icon(forBundleIdentifier: $0) }) {
                 Image(nsImage: icon).resizable().frame(width: 18, height: 18)
             } else {
                 Image(systemName: "text.cursor").font(.system(size: 11, weight: .semibold)).foregroundStyle(Tokens.labelSecondary).frame(width: 18, height: 18)
             }
-            Text(controller.target?.name ?? "Front app").font(.mmCallout).foregroundStyle(Tokens.labelSecondary)
+            Text(target?.name ?? "Front app").font(.mmCallout).foregroundStyle(Tokens.labelSecondary)
         }
     }
 
