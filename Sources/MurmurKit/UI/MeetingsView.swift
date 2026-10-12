@@ -405,3 +405,83 @@ struct MeetingsView: View {
         meeting.date.addingTimeInterval(start).formatted(date: .omitted, time: .shortened)
     }
 }
+
+/// What the recording pill shows once a meeting is done, for a few seconds.
+@Observable
+final class MeetingPillState {
+    var finished: UUID?
+}
+
+/// The small pill at the top of the screen while a meeting records or transcribes: proof it is running,
+/// with Stop one click away. It is left out of screen shares, recordings and screenshots.
+struct MeetingPillView: View {
+    let stores: Stores
+    let pill: MeetingPillState
+    @Environment(\.appActions) private var actions
+
+    private var controller: MeetingController { stores.meeting }
+
+    var body: some View {
+        Group {
+            switch controller.state {
+            case .recording(let since):
+                HStack(spacing: 9) {
+                    PulseDot()
+                    ElapsedTime(since: since).font(.mmMono)
+                    MiniLevel(level: controller.level)
+                    Button { controller.stop() } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "stop.fill").font(.system(size: 8, weight: .bold))
+                            Text("Stop & Transcribe")
+                        }
+                    }
+                    .buttonStyle(MurmurButtonStyle(kind: .recording, height: 24, fontSize: 11.5))
+                    .padding(.leading, 2)
+                }
+                .padding(EdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 6))
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Murmur is recording a meeting")
+            case .transcribing(_, let progress):
+                HStack(spacing: 9) {
+                    Spinner()
+                    Text("Transcribing on this Mac · \(Int(progress * 100))%").font(.system(size: 12.5, weight: .medium)).monospacedDigit()
+                }
+                .padding(.horizontal, 14)
+            case .idle:
+                if let meeting = pill.finished.flatMap({ stores.meetings.meeting($0) }) {
+                    HStack(spacing: 9) {
+                        Image(systemName: meeting.isTranscribed ? "checkmark" : "exclamationmark.triangle")
+                            .font(.system(size: 11, weight: .bold)).foregroundStyle(meeting.isTranscribed ? Tokens.success : Tokens.warning)
+                        Text(meeting.isTranscribed ? "\(meeting.title) · \(MeetingsView.length(meeting.duration))" : "Couldn’t transcribe the meeting")
+                            .font(.system(size: 12.5, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                            .frame(maxWidth: 300).fixedSize()
+                        Button("Open") {
+                            pill.finished = nil
+                            actions.openMeetings()
+                        }
+                        .buttonStyle(MurmurButtonStyle(height: 24, fontSize: 11.5))
+                    }
+                    .padding(EdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 6))
+                }
+            }
+        }
+        .frame(height: 36)
+        .glassPill()
+        .foregroundStyle(Tokens.label)
+        .id(stores.settings.accent)
+    }
+
+    /// Three bars that move with the microphone, so a dead microphone is obvious.
+    private struct MiniLevel: View {
+        let level: Float
+        var body: some View {
+            HStack(alignment: .center, spacing: 2) {
+                ForEach(0..<3, id: \.self) { bar in
+                    let lit = Double(level) > [0.04, 0.2, 0.45][bar]
+                    Pill().fill(lit ? Tokens.label : Tokens.controlStrong).frame(width: 2.5, height: CGFloat(6 + bar * 3))
+                }
+            }
+            .accessibilityHidden(true)
+        }
+    }
+}

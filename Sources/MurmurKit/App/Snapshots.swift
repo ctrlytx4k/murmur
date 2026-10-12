@@ -169,6 +169,10 @@ enum Snapshots {
             live.meeting.start()
             add("meetings-recording", MainWindowMeeting(stores: live, selection: nil))
             add("dropdown-meeting-recording", DropdownView(stores: live, statsToday: statsDay))
+            add("meeting-pill-recording", MeetingPillView(stores: live, pill: MeetingPillState()))
+            let done = MeetingPillState()
+            done.finished = st.meetings.meetings.first?.id
+            add("meeting-pill-ready", MeetingPillView(stores: st, pill: done))
             let waiting = make(.idle, empty: true)
             var failed = Meeting(title: "Meeting, 9:30 AM", date: Date().addingTimeInterval(-3600), duration: 754, includesCallAudio: true)
             failed.problem = "The speech model (parakeet-v3) is still downloading."

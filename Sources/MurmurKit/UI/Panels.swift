@@ -202,6 +202,56 @@ final class OverlayController {
     }
 }
 
+/// Shows the meeting pill at the top center of the screen while a meeting records or transcribes, and for a
+/// few seconds once it is ready. The pill can be dragged, and it never appears in a screen share.
+final class MeetingPillController {
+    private let panel = FloatingPanel(level: .statusBar, allowsKey: false)
+    private let controller: MeetingController
+    private let pill = MeetingPillState()
+    private var wasBusy = false
+    private var placed = false
+    private var hide: Task<Void, Never>?
+
+    init(stores: Stores, actions: AppActions) {
+        controller = stores.meeting
+        // Left out of screen sharing, screen recording and screenshots.
+        panel.sharingType = .none
+        panel.isMovableByWindowBackground = true
+        panel.setContent(MeetingPillView(stores: stores, pill: pill).environment(\.appActions, actions), canvas: Self.canvas, alignment: .top) { [weak self] size in
+            self?.place(size)
+        }
+        observeChanges { [weak self] in self?.update() }
+    }
+
+    private static let canvas = CGSize(width: 460, height: 36 + 2 * FloatingPanel.margin)
+
+    private func update() {
+        let busy = !controller.state.isIdle
+        if busy {
+            hide?.cancel()
+            pill.finished = nil
+        } else if wasBusy, let latest = controller.latest {
+            // Done: say so for a moment, with a way to open it.
+            pill.finished = latest
+            hide?.cancel()
+            hide = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(6))
+                if !Task.isCancelled { self?.pill.finished = nil }
+            }
+        }
+        wasBusy = busy
+        if busy || pill.finished != nil { panel.fadeIn() } else { panel.fadeOut() }
+    }
+
+    /// Top center, just under the menu bar. Only the first time: after that it stays where it was dragged.
+    private func place(_ size: CGSize) {
+        guard !placed, size.width > 0, let screen = NSScreen.main else { return }
+        placed = true
+        let area = screen.visibleFrame
+        panel.setFrame(NSRect(x: (area.midX - size.width / 2).rounded(), y: area.maxY - 6 - size.height + FloatingPanel.margin, width: size.width, height: size.height), display: true, animate: false)
+    }
+}
+
 /// Owns the menu bar item: the icon for each state and the dropdown under it.
 final class StatusItemController: NSObject {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)

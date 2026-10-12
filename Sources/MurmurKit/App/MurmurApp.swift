@@ -24,6 +24,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
     private var lastSoundState: DictationState = .idle
     private var statusItem: StatusItemController!
     private var overlay: OverlayController!
+    private var meetingPill: MeetingPillController!
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
     private var permissionPoll: Timer?
@@ -141,6 +142,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             quit: { NSApp.terminate(nil) })
         statusItem = StatusItemController(stores: stores, actions: actions)
         overlay = OverlayController(stores: stores, actions: actions)
+        meetingPill = MeetingPillController(stores: stores, actions: actions)
         if !demo { observeChanges { [weak self] in self?.syncServices() } }
 
         // Permission state is never cached: re-read it while the app runs so the icon stays honest.

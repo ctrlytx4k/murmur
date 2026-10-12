@@ -54,7 +54,7 @@ Built in steps, each usable on its own:
 1. Record and transcribe: Meetings tab, Start and Stop, microphone plus call audio, raw transcript. Done.
 2. Speakers: tell the people on the call apart, with renaming.
 3. Summaries, only on request: a "Summarize with" pop-up listing every provider (local first), cloud behind the existing consent, Regenerate and Delete summary, long meetings in chunks.
-4. The recording pill that stays out of screen shares, "a call started, record it?", the tell-people reminder, export, a Meetings settings pane.
+4. "A call started, record it?", pause, the tell-people reminder, export, a Meetings settings pane. The recording pill itself (top center, draggable, left out of screen shares) is done.
 
 ## Design
 - Source of truth: the mockup HTML in design/ (I will add it). Don't build UI until it's there.
