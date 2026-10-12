@@ -126,6 +126,8 @@ enum InsertionMatrix {
             return fail(row, "The test page did not open in front")
         }
         await pause(0.8)
+        // A browser that was just launched can hand focus away once while it settles.
+        if frontmost != browser, await bringToFront(browser) { await pause(0.8) }
         defer { if frontmost == browser, (windowTitle(of: browser) ?? "").contains("MM") { press(kVK_ANSI_W, .maskCommand) } }
 
         if secure {
