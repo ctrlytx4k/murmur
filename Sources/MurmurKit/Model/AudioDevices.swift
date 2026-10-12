@@ -5,6 +5,8 @@ import Observation
 public nonisolated struct InputDevice: Identifiable, Equatable, Sendable {
     public var id: String
     public var name: String
+    /// How it is connected, in a word: "Built-in", "USB", "Bluetooth". Nil when Core Audio does not say.
+    public var connection: String?
 }
 
 /// Input devices, read straight from Core Audio so the list matches System Settings > Sound.
@@ -14,8 +16,30 @@ enum AudioDevices {
             guard hasInput(id), let uid = string(id, kAudioDevicePropertyDeviceUID), let name = string(id, kAudioObjectPropertyName) else { return nil }
             // AVAudioEngine makes private aggregate devices for its own use. They are not microphones.
             if transport(id) == kAudioDeviceTransportTypeAggregate, name.hasPrefix("CADefaultDeviceAggregate") { return nil }
-            return InputDevice(id: uid, name: name)
+            return InputDevice(id: uid, name: name, connection: connectionName(transport(id)))
         }
+    }
+
+    private static func connectionName(_ transport: UInt32) -> String? {
+        switch transport {
+        case kAudioDeviceTransportTypeBuiltIn: "Built-in"
+        case kAudioDeviceTransportTypeUSB: "USB"
+        case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE: "Bluetooth"
+        case kAudioDeviceTransportTypeThunderbolt: "Thunderbolt"
+        case kAudioDeviceTransportTypeHDMI, kAudioDeviceTransportTypeDisplayPort: "Display"
+        case kAudioDeviceTransportTypeAirPlay: "AirPlay"
+        case kAudioDeviceTransportTypeContinuityCaptureWired, kAudioDeviceTransportTypeContinuityCaptureWireless: "iPhone"
+        case kAudioDeviceTransportTypeVirtual, kAudioDeviceTransportTypeAggregate: "Virtual"
+        default: nil
+        }
+    }
+
+    /// The microphone choices as menu rows, shared by Settings and the menu bar dropdown.
+    static func menuOptions() -> (options: [(value: String?, label: String)], details: [String?: String]) {
+        let devices = inputs()
+        var details: [String?: String] = [nil: systemDefaultName.map { "Follows System Settings · \($0)" } ?? "Follows System Settings"]
+        for device in devices { details[device.id] = device.connection }
+        return ([(nil, "System Default")] + devices.map { (Optional($0.id), $0.name) }, details)
     }
 
     static var systemDefaultName: String? {

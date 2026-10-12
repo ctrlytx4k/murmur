@@ -84,7 +84,11 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             self.router = router
 
             let hotkeys = LiveHotkeyService()
-            hotkeys.onEvent = { [weak self] event in self?.controller.hotkey(event) }
+            hotkeys.onEvent = { [weak self] event in
+                // Esc with an overlay menu open closes the menu, not the take.
+                if event == .cancel, GlassMenuPresenter.shared.closeOverlayMenu() { return }
+                self?.controller.hotkey(event)
+            }
             hotkeys.onAction = { [weak self] action in self?.perform(action) }
             self.hotkeys = hotkeys
         }
@@ -137,8 +141,19 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         statusItem.open()
         await pause(1.5)
         controller.start()
-        await pause(3)
+        await pause(1.5)
+        // A glass menu over the overlay: it must show without taking key, and leave with the take.
+        let overlayPanel = NSApp.windows.first { $0 is FloatingPanel && $0.isVisible && !$0.canBecomeKey }
+        GlassMenuPresenter.shared.toggle(id: "tour", anchor: overlayPanel?.contentView, keyboard: false, endsWithTake: true, items: [
+            GlassMenuItem(title: "Raw", detail: DictationMode.raw.summary, symbol: DictationMode.raw.symbol),
+            GlassMenuItem(title: "Cleaned up", detail: DictationMode.cleaned.summary, symbol: DictationMode.cleaned.symbol, isSelected: true),
+        ])
+        await pause(1.5)
+        let menu = NSApp.windows.first { $0 is GlassMenuPanel }
+        print("tour: menu visible \(menu?.isVisible ?? false), key \(menu?.isKeyWindow ?? false), still recording \(controller.state.isRecording), frame \(menu?.frame ?? .zero), screen \(NSScreen.main?.visibleFrame ?? .zero)")
         controller.stopAndInsert()
+        await pause(0.3)
+        print("tour: menu closed with the take \(!(menu?.isVisible ?? false))")
         await pause(3.5)
         statusItem.close()
         for pane in SettingsPane.allCases {

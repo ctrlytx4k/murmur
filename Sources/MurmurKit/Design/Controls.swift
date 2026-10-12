@@ -1,56 +1,5 @@
 import SwiftUI
 
-/// A capsule pop-up: the current value with up/down chevrons, opening a menu of choices.
-struct PopPicker<Value: Hashable>: View {
-    let label: String
-    let options: [(value: Value, label: String)]
-    @Binding var selection: Value
-    var height: CGFloat = 26
-    var tint: Color = Tokens.label
-
-    var body: some View {
-        Menu {
-            Picker(label, selection: $selection) {
-                ForEach(options, id: \.value) { Text($0.label).tag($0.value) }
-            }
-            .pickerStyle(.inline)
-            .labelsHidden()
-        } label: {
-            PopLabel(text: options.first { $0.value == selection }?.label ?? "", height: height, tint: tint)
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel(label)
-    }
-}
-
-struct PopLabel: View {
-    let text: String
-    var height: CGFloat = 26
-    var tint: Color = Tokens.label
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Text(text).font(.system(size: 12.5)).lineLimit(1)
-            Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .bold))
-        }
-        .foregroundStyle(tint)
-        .padding(EdgeInsets(top: 0, leading: 11, bottom: 0, trailing: 8))
-        .frame(height: height)
-        .chipPill()
-        .contentShape(Pill())
-    }
-}
-
-extension PopPicker where Value: CaseIterable & RawRepresentable, Value.RawValue == String, Value.AllCases: RandomAccessCollection {
-    /// For enums whose raw value is the label.
-    init(_ label: String, selection: Binding<Value>) {
-        self.init(label: label, options: Value.allCases.map { ($0, $0.rawValue) }, selection: selection)
-    }
-}
-
 /// Solid text field: 30 pt tall, 10 pt corners, accent ring when focused or flagged.
 struct FieldChrome: ViewModifier {
     var emphasized = false

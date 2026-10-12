@@ -52,6 +52,26 @@ enum Snapshots {
         let recording = DictationState.recording(since: Date().addingTimeInterval(-7))
         var st = make(.idle, last: last)
         add("dropdown-idle", DropdownView(stores: st))
+        add("dropdown-model-expanded", DropdownView(stores: st, expanded: .model))
+        add("dropdown-microphone-expanded", DropdownView(stores: st, expanded: .microphone))
+        add("menu-overlay-mode", GlassMenu(items: [
+            GlassMenuItem(title: "Raw", detail: DictationMode.raw.summary, symbol: DictationMode.raw.symbol),
+            GlassMenuItem(title: "Cleaned up", detail: DictationMode.cleaned.summary, symbol: DictationMode.cleaned.symbol, isSelected: true),
+            .separator,
+            GlassMenuItem(title: "Insert now", keys: "↩"),
+            GlassMenuItem(title: "Copy instead", keys: "⌘C", isDisabled: true, disabledReason: "Nothing to copy"),
+            .separator,
+            GlassMenuItem(title: "Cancel take", keys: "esc", isDestructive: true),
+        ]))
+        add("menu-microphone", GlassMenu(items: [
+            .header("Input"),
+            GlassMenuItem(title: "System Default", detail: "Follows System Settings · MacBook Pro Microphone"),
+            GlassMenuItem(title: "MacBook Pro Microphone", detail: "Built-in"),
+            GlassMenuItem(title: "USB mic", detail: "USB", isSelected: true),
+            .separator,
+            GlassMenuItem(title: "Sound settings…", isAccent: true),
+        ]))
+        add("menu-plain", GlassMenu(items: SettingsStore.Retention.allCases.map { GlassMenuItem(title: $0.rawValue, isSelected: $0 == .month) }))
         st = make(recording)
         add("dropdown-recording", DropdownView(stores: st))
         add("overlay-listening", OverlayView(stores: st))

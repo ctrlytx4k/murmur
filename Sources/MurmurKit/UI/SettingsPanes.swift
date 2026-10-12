@@ -24,7 +24,7 @@ struct VoiceEnginePane: View {
 
         SettingsGroup(title: "Processing") {
             SettingsRow(title: "Language", subtitle: "The language you dictate in", showsDivider: false) {
-                PopPicker(label: "Language", options: SettingsStore.languages.map { ($0, $0) }, selection: bind(settings, \.language))
+                GlassPopUpButton(label: "Language", options: SettingsStore.languages.map { ($0, $0) }, selection: bind(settings, \.language))
             }
             SettingsRow(title: "Model storage", subtitle: "~/Library/Application Support/Murmur/Models") {
                 Button("Show in Finder") {
@@ -180,7 +180,7 @@ struct CleanupPane: View {
                         Text(app.name).font(.mmBody)
                         Spacer()
                         if app.preset == "raw" { Text("no cleanup").font(.mmSub).foregroundStyle(Tokens.labelTertiary) }
-                        PopPicker(
+                        GlassPopUpButton(
                             label: "Preset for \(app.name)", options: presetOptions,
                             selection: Binding(get: { app.preset }, set: { settings.appPresets[index].preset = $0 }))
                         IconButton(symbol: "minus.circle", label: "Remove \(app.name)") { settings.appPresets.removeAll { $0.id == app.id } }
@@ -259,7 +259,7 @@ struct PrivacyPane: View {
 
         SettingsGroup(title: "History on this Mac") {
             SettingsRow(title: "Keep transcriptions", subtitle: "Stored in your Library folder, never synced", showsDivider: false) {
-                PopPicker("Keep transcriptions", selection: Binding(get: { settings.retention }, set: { new in
+                GlassPopUpButton("Keep transcriptions", selection: Binding(get: { settings.retention }, set: { new in
                     settings.retention = new
                     stores.history.prune(retention: new)
                 }))
@@ -298,7 +298,7 @@ struct AdvancedPane: View {
     var body: some View {
         SettingsGroup(title: "Text insertion") {
             SettingsRow(title: "Insert by", subtitle: "Pasting is faster for long text; typing works in more apps", showsDivider: false) {
-                PopPicker("Insert by", selection: bind(settings, \.insertMethod))
+                GlassPopUpButton("Insert by", selection: bind(settings, \.insertMethod))
             }
             SwitchRow(title: "Restore clipboard after pasting", isOn: bind(settings, \.restoresClipboard))
             SwitchRow(title: "Add a space after inserted text", isOn: bind(settings, \.addsTrailingSpace))
@@ -306,7 +306,7 @@ struct AdvancedPane: View {
 
         SettingsGroup(title: "Audio") {
             SettingsRow(title: "Maximum recording length", subtitle: "Recording stops and inserts when reached", showsDivider: false) {
-                PopPicker("Maximum recording length", selection: bind(settings, \.maxLength))
+                GlassPopUpButton("Maximum recording length", selection: bind(settings, \.maxLength))
             }
         }
 

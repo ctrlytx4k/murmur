@@ -195,33 +195,46 @@ struct OverlayView: View {
     // MARK: pieces
 
     private var modeMenu: some View {
-        Menu {
-            Picker("Mode", selection: bind(settings, \.mode)) {
-                ForEach(DictationMode.offered, id: \.self) { Text($0.label).tag($0) }
-            }
-            .pickerStyle(.inline).labelsHidden()
-        } label: {
+        GlassMenuButton(keyboard: false, endsWithTake: true, items: { modeItems }) { isOpen in
             HStack(spacing: 4) {
                 Text(settings.mode.label).font(.system(size: 11.5, weight: .semibold))
-                Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)).rotationEffect(.degrees(isOpen ? 180 : 0))
             }
             .foregroundStyle(Tokens.accentText)
             .padding(EdgeInsets(top: 0, leading: 11, bottom: 0, trailing: 9))
-            .frame(height: 26).chipPill().contentShape(Pill())
+            .frame(height: 26).chipPill()
+            .modifier(GlassMenuOpenHighlight(isOpen: isOpen, shape: Pill()))
+            .contentShape(Pill())
         }
-        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .fixedSize()
         .accessibilityLabel("Mode, \(settings.mode.label)")
     }
 
-    private var moreMenu: some View {
-        Menu {
-            Button("Cancel Dictation") { controller.cancel() }
-            Button("Open Settings…") { actions.openSettings(nil) }
-        } label: {
-            Image(systemName: "ellipsis").font(.system(size: 11, weight: .bold)).foregroundStyle(Tokens.labelSecondary)
-                .frame(width: 26, height: 26).chipPill().contentShape(Circle())
+    private var modeItems: [GlassMenuItem] {
+        var items = DictationMode.offered.map { mode in
+            GlassMenuItem(title: mode.label, detail: mode.summary, symbol: mode.symbol, isSelected: settings.mode == mode) { settings.mode = mode }
         }
-        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        if settings.cleanupEnabled {
+            items += [.separator, .custom(CleanupStylePicker(settings: settings))]
+        }
+        return items
+    }
+
+    private var moreMenu: some View {
+        GlassMenuButton(keyboard: false, endsWithTake: true, items: {
+            [
+                GlassMenuItem(title: "Insert now", keys: settings.hotkeyBindings.returnCommits || controller.isLatched ? "↩" : nil) { controller.stopAndInsert() },
+                GlassMenuItem(title: "Open Settings…") { actions.openSettings(nil) },
+                .separator,
+                GlassMenuItem(title: "Cancel take", keys: "esc", isDestructive: true) { controller.cancel() },
+            ]
+        }) { isOpen in
+            Image(systemName: "ellipsis").font(.system(size: 11, weight: .bold)).foregroundStyle(Tokens.labelSecondary)
+                .frame(width: 26, height: 26).chipPill()
+                .modifier(GlassMenuOpenHighlight(isOpen: isOpen, shape: Pill()))
+                .contentShape(Circle())
+        }
+        .fixedSize()
         .accessibilityLabel("More actions")
     }
 
@@ -251,6 +264,21 @@ struct OverlayView: View {
         Text(text).font(.system(size: 10)).foregroundStyle(Tokens.labelSecondary)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .chipSurface(cornerRadius: 6)
+    }
+}
+
+/// The foot of the overlay's mode menu: the cleanup style, changed without leaving the take.
+private struct CleanupStylePicker: View {
+    let settings: SettingsStore
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("Style").font(.system(size: 12)).foregroundStyle(Tokens.labelSecondary)
+            SegmentedPicker(
+                options: [CleanupPreset.lightTouch, .polished, .notes].map { ($0, $0.name) },
+                selection: bind(settings, \.cleanupPreset), height: 22)
+                .frame(width: 230)
+        }
     }
 }
 

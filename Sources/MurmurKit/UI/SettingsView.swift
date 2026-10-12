@@ -174,7 +174,7 @@ private struct GeneralPane: View {
 
         SettingsGroup(title: "Feedback") {
             SettingsRow(title: "Sounds", subtitle: "A soft tick on start and stop", showsDivider: false) {
-                PopPicker("Sound set", selection: bind(settings, \.soundSet)).disabled(!settings.soundsEnabled)
+                GlassPopUpButton("Sound set", selection: bind(settings, \.soundSet)).disabled(!settings.soundsEnabled)
                 Toggle("Sounds", isOn: bind(settings, \.soundsEnabled)).toggleStyle(MurmurToggleStyle())
             }
             SettingsRow(
@@ -182,10 +182,13 @@ private struct GeneralPane: View {
                 subtitle: stores.controller.permissions.microphone ? "System Default follows the input chosen in System Settings" : "Microphone access is off",
                 subtitleColor: stores.controller.permissions.microphone ? Tokens.labelTertiary : Tokens.warning
             ) {
-                PopPicker(
-                    label: "Microphone",
-                    options: [(String?.none, "System Default")] + AudioDevices.inputs().map { (String?.some($0.id), $0.name) },
-                    selection: bind(settings, \.microphoneID))
+                let microphones = AudioDevices.menuOptions()
+                GlassPopUpButton(
+                    label: "Microphone", options: microphones.options, selection: bind(settings, \.microphoneID),
+                    details: microphones.details, header: "Input",
+                    footer: [GlassMenuItem(title: "Sound settings…", isAccent: true) {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension")!)
+                    }])
             }
         }
 

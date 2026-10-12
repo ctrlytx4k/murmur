@@ -109,6 +109,7 @@ final class OverlayController {
     private static let canvas = CGSize(width: 448, height: 300)
 
     private func update() {
+        if !controller.state.isRecording { GlassMenuPresenter.shared.takeEnded() }
         if controller.state == .idle { panel.fadeOut() } else { panel.fadeIn() }
     }
 
@@ -154,7 +155,7 @@ final class StatusItemController: NSObject {
 
     /// The 340 pt dropdown plus shadow room, and taller than its tallest state. The dropdown changes height
     /// with the dictation state; resizing the window to follow made it jump and ride up over the menu bar.
-    private static let canvas = CGSize(width: 340 + 2 * FloatingPanel.margin, height: 860)
+    private static let canvas = CGSize(width: 340 + 2 * FloatingPanel.margin, height: 1000)
 
     var menuBarState: MenuBarState {
         switch controller.state {
@@ -223,6 +224,7 @@ final class StatusItemController: NSObject {
     }
 
     func close(immediately: Bool = false) {
+        GlassMenuPresenter.shared.close()
         if let outsideClicks { NSEvent.removeMonitor(outsideClicks) }
         outsideClicks = nil
         if immediately {

@@ -13,6 +13,15 @@ public nonisolated enum DictationMode: String, CaseIterable, Codable, Sendable {
         }
     }
 
+    /// One line on what the mode does, for menus.
+    public var summary: String {
+        switch self {
+        case .raw: "Exactly what you said"
+        case .cleaned: "Fixes fillers, punctuation and casing"
+        case .command: "Say an edit for the selected text"
+        }
+    }
+
     public var shortLabel: String { self == .cleaned ? "Cleaned" : label }
 
     public var symbol: String {

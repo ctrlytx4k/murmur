@@ -1,9 +1,14 @@
 import SwiftUI
 
+/// The rows of the dropdown that open in place to show their choices. One at a time.
+enum DropdownSection { case model, microphone }
+
 /// The 340 pt glass panel under the menu bar icon.
 struct DropdownView: View {
     let stores: Stores
+    @State var expanded: DropdownSection?
     @Environment(\.appActions) private var actions
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Briefly true after Copy, so the button can confirm it worked.
     @State private var copied = false
 
@@ -180,57 +185,115 @@ struct DropdownView: View {
         .padding(EdgeInsets(top: 0, leading: 8, bottom: 10, trailing: 8))
     }
 
-    private var chevrons: some View {
-        Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Tokens.labelTertiary)
+    private func chevron(open: Bool) -> some View {
+        Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(Tokens.labelTertiary)
+            .rotationEffect(.degrees(open ? 180 : 0))
+    }
+
+    private func toggle(_ section: DropdownSection) {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { expanded = expanded == section ? nil : section }
     }
 
     private var infoRows: some View {
         VStack(spacing: 0) {
-            Button {
-                actions.closeDropdown()
-                actions.openSettings(.voiceEngine)
-            } label: {
+            Button { toggle(.model) } label: {
                 infoRow(symbol: "cpu", title: "Model") {
                     Text(modelName).lineLimit(1)
-                    chevrons
+                    chevron(open: expanded == .model)
                 }
             }
             .buttonStyle(HoverRowStyle())
-            Menu {
-                Picker("Language", selection: bind(settings, \.language)) {
-                    ForEach(SettingsStore.languages, id: \.self) { Text($0).tag($0) }
+            .accessibilityValue(expanded == .model ? "Expanded" : "Collapsed")
+            if expanded == .model { modelList }
+
+            GlassMenuButton(items: {
+                SettingsStore.languages.map { language in
+                    GlassMenuItem(title: language, isSelected: settings.language == language) { settings.language = language }
                 }
-                .pickerStyle(.inline).labelsHidden()
-            } label: {
+            }) { isOpen in
                 infoRow(symbol: "globe", title: "Language") {
                     Text(languageName)
-                    chevrons
+                    chevron(open: isOpen)
                 }
+                .background(isOpen ? Tokens.control : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .contentShape(Rectangle())
             }
-            .menuStyle(.button).buttonStyle(HoverRowStyle()).menuIndicator(.hidden)
-            Menu {
-                Picker("Microphone", selection: bind(settings, \.microphoneID)) {
-                    Text("System Default").tag(String?.none)
-                    ForEach(AudioDevices.inputs()) { device in Text(device.name).tag(String?.some(device.id)) }
-                }
-                .pickerStyle(.inline)
-                .labelsHidden()
-            } label: {
+
+            Button { toggle(.microphone) } label: {
                 infoRow(symbol: "mic", title: "Microphone") {
                     if controller.permissions.microphone {
                         Text(AudioDevices.displayName(for: settings.microphoneID)).lineLimit(1)
                     } else {
                         Text("No access").fontWeight(.semibold).foregroundStyle(Tokens.warning)
                     }
-                    chevrons
+                    chevron(open: expanded == .microphone)
                 }
             }
-            .menuStyle(.button)
             .buttonStyle(HoverRowStyle())
-            .menuIndicator(.hidden)
             .disabled(!controller.permissions.microphone)
+            .accessibilityValue(expanded == .microphone ? "Expanded" : "Collapsed")
+            if expanded == .microphone, controller.permissions.microphone { microphoneList }
         }
         .padding(.vertical, 6)
+    }
+
+    /// An expanded row's choices: indented, with a thin rule down the left.
+    private func accordion(@ViewBuilder _ rows: () -> some View) -> some View {
+        VStack(spacing: 1, content: rows)
+            .padding(.leading, 8)
+            .overlay(alignment: .leading) { Rectangle().fill(Tokens.separator).frame(width: 1) }
+            .padding(EdgeInsets(top: 2, leading: 18, bottom: 6, trailing: 8))
+    }
+
+    private func choice(_ title: String, detail: String? = nil, selected: Bool = false, monospaced: Bool = false, accent: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Circle().fill(selected ? Tokens.accent : .clear).frame(width: 6, height: 6)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 12.5, weight: selected ? .semibold : .regular, design: monospaced ? .monospaced : .default))
+                        .foregroundStyle(selected || accent ? Tokens.accentText : Tokens.label)
+                    if let detail { Text(detail).font(.system(size: 11)).foregroundStyle(Tokens.labelTertiary) }
+                }
+                .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 9)
+            .frame(height: detail == nil ? 30 : 42)
+            .background(selected ? Tokens.accent.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(HoverRowStyle())
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var modelList: some View {
+        accordion {
+            ForEach(stores.catalog.models) { model in
+                choice(model.name, detail: model.isUsable ? model.detail : "Not downloaded yet", selected: settings.modelID == model.id && model.isUsable, monospaced: true) {
+                    if model.isUsable {
+                        settings.modelID = model.id
+                    } else {
+                        actions.closeDropdown()
+                        actions.openSettings(.voiceEngine)
+                    }
+                }
+            }
+            choice("Manage models…", accent: true) {
+                actions.closeDropdown()
+                actions.openSettings(.voiceEngine)
+            }
+        }
+    }
+
+    private var microphoneList: some View {
+        let microphones = AudioDevices.menuOptions()
+        return accordion {
+            ForEach(microphones.options, id: \.value) { option in
+                choice(option.label, detail: microphones.details[option.value], selected: settings.microphoneID == option.value) {
+                    settings.microphoneID = option.value
+                }
+            }
+        }
     }
 
     private var links: some View {

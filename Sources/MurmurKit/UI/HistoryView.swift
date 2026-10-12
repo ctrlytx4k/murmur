@@ -58,21 +58,21 @@ struct HistoryView: View {
                     rangeButton("Today", .today)
                     rangeButton("This week", .week)
                     Spacer()
-                    Menu {
-                        Picker("App", selection: $app) {
-                            Text("All apps").tag(String?.none)
-                            ForEach(Array(Set(history.entries.map(\.appName))).sorted(), id: \.self) { Text($0).tag(String?.some($0)) }
+                    GlassMenuButton(items: {
+                        ([String?.none] + Array(Set(history.entries.map(\.appName))).sorted().map(Optional.some)).map { name in
+                            GlassMenuItem(title: name ?? "All apps", isSelected: app == name) { app = name }
                         }
-                        .pickerStyle(.inline).labelsHidden()
-                    } label: {
+                    }) { isOpen in
                         HStack(spacing: 5) {
                             Text(app ?? "All apps")
-                            Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+                            Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)).rotationEffect(.degrees(isOpen ? 180 : 0))
                         }
                         .font(.system(size: 12, weight: .medium)).foregroundStyle(Tokens.labelSecondary)
-                        .padding(.horizontal, 12).frame(height: 26).contentShape(Pill())
+                        .padding(.horizontal, 12).frame(height: 26)
+                        .modifier(GlassMenuOpenHighlight(isOpen: isOpen, shape: Pill()))
+                        .contentShape(Pill())
                     }
-                    .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                    .fixedSize()
                 }
             }
             .padding(EdgeInsets(top: 0, leading: 12, bottom: 8, trailing: 12))
