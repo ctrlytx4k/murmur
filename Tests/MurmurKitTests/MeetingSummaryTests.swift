@@ -8,11 +8,26 @@ private final class SummaryFakeModel: LocalTextModel {
     var prompts: [(system: String, user: String)] = []
     var fails = false
     var onCall: () -> Void = {}
+    /// Requests wait here until `release()`, like a model that is slow to answer.
+    var holds = false
+    private var held: [CheckedContinuation<Void, Never>] = []
     struct Broken: Error {}
+
+    func release() {
+        holds = false
+        held.forEach { $0.resume() }
+        held = []
+    }
+
+    /// Answers only the request that has waited longest.
+    func releaseFirst() {
+        if !held.isEmpty { held.removeFirst().resume() }
+    }
 
     func generate(system: String, user: String) async throws -> String {
         prompts.append((system, user))
         onCall()
+        if holds { await withCheckedContinuation { held.append($0) } }
         if fails { throw Broken() }
         return "Key points\n- point \(prompts.count)\n\nAction items\n- None mentioned"
     }
@@ -206,6 +221,53 @@ private final class SummaryFakeTransport: ProviderTransport, @unchecked Sendable
 
         rig.model.availability = .unavailable("Apple Intelligence is turned off in System Settings")
         #expect(rig.summarizer.unavailableReason(.apple) == "Apple Intelligence is turned off in System Settings")
+    }
+
+    @Test func aCancelledSummaryLeavesTheNextOneAlone() async {
+        let rig = rig(lines: 300)
+        rig.model.holds = true
+        rig.summarizer.summarize(rig.meeting, with: .apple)
+        let cancelled = rig.summarizer.pendingWork
+        while rig.model.prompts.count < 1 { await Task.yield() }
+        rig.summarizer.cancel()
+        #expect(rig.summarizer.state == .idle && !rig.summarizer.isBusy)
+
+        // Summarize again while the first request of the cancelled run is still out.
+        rig.summarizer.summarize(rig.meeting, with: .apple)
+        while rig.model.prompts.count < 2 { await Task.yield() }
+        #expect(rig.summarizer.isWorking(on: rig.meeting))
+        // The cancelled run gets its answer and ends. The new one is still shown as working.
+        rig.model.releaseFirst()
+        await cancelled?.value
+        #expect(rig.summarizer.isBusy && rig.store.meeting(rig.meeting)?.summary == nil)
+        rig.model.release()
+        await rig.summarizer.pendingWork?.value
+        #expect(rig.store.meeting(rig.meeting)?.summary != nil && rig.summarizer.state == .idle)
+    }
+
+    @Test func aSecondSummaryWaitsItsTurnAndSaysSo() async {
+        let rig = rig()
+        rig.model.holds = true
+        rig.summarizer.summarize(rig.meeting, with: .apple)
+        while rig.model.prompts.count < 1 { await Task.yield() }
+        #expect(rig.summarizer.isBusy)
+        // Pressing Summarize again starts nothing new; the interface greys the button out on `isBusy`.
+        rig.summarizer.summarize(rig.meeting, with: .apple)
+        rig.model.release()
+        await rig.summarizer.pendingWork?.value
+        #expect(rig.model.prompts.count == 1 && !rig.summarizer.isBusy)
+    }
+
+    @Test func aRefusalThatSmallerPiecesCannotFixIsNotRetried() async {
+        // Three short lines cannot be cut any smaller, so a 400 is about something else (a wrong model name, say).
+        let rig = rig()
+        rig.summarizer.grantConsent(cloud)
+        rig.transport.limit = 10
+        rig.summarizer.summarize(rig.meeting, with: cloud)
+        await rig.summarizer.pendingWork?.value
+        #expect(rig.transport.sent.count == 1)
+        if case .failed = rig.summarizer.state {} else { Issue.record("the refusal should be shown") }
+        #expect(rig.store.meeting(rig.meeting)?.summary == nil)
     }
 
     // MARK: long meetings

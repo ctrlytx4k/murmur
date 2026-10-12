@@ -504,9 +504,13 @@ struct MeetingsView: View {
                     providerPopUp
                     Button("Summarize") { startSummary(meeting) }
                         .buttonStyle(MurmurButtonStyle(kind: .primary, height: 30, fontSize: 12.5))
-                        .disabled(summarizer.unavailableReason(chosenProvider()) != nil)
+                        .disabled(summarizer.isBusy || summarizer.unavailableReason(chosenProvider()) != nil)
                 }
                 summaryStatus(meeting)
+                if summarizer.isBusy {
+                    Text("Another meeting is being summarized. This one can be summarized when that is done.")
+                        .font(.mmCallout).foregroundStyle(Tokens.labelTertiary)
+                }
             }
         }
         .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
@@ -525,7 +529,8 @@ struct MeetingsView: View {
                 providerPopUp
                 Button("Regenerate") { startSummary(meeting) }
                     .buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5))
-                    .disabled(summarizer.isWorking(on: meeting.id) || summarizer.unavailableReason(chosenProvider()) != nil)
+                    .disabled(summarizer.isBusy || summarizer.unavailableReason(chosenProvider()) != nil)
+                    .help(summarizer.isBusy && !summarizer.isWorking(on: meeting.id) ? "Another meeting is being summarized" : "")
                 Button("Delete summary") { confirmingDeleteSummary = true }.buttonStyle(MurmurButtonStyle(kind: .danger, height: 28, fontSize: 12.5))
             }
             summaryStatus(meeting)

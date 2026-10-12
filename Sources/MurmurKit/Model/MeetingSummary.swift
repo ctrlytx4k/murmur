@@ -114,6 +114,8 @@ public final class MeetingSummarizer {
     @ObservationIgnored private let now: () -> Date
     /// The summary in flight. Tests await it.
     @ObservationIgnored public private(set) var pendingWork: Task<Void, Never>?
+    /// Goes up with every Summarize and every Cancel, so a run that was cancelled can tell it is no longer the one being shown.
+    @ObservationIgnored private var run = 0
 
     public init(store: MeetingStore, providers: ProviderStore, settings: SettingsStore, router: CleanupRouter, local: (any LocalTextModel)?, now: @escaping () -> Date = Date.init) {
         self.store = store
@@ -152,6 +154,11 @@ public final class MeetingSummarizer {
         if case .working(let working, _, _) = state { working == id } else { false }
     }
 
+    /// A summary is being made, of this meeting or another. One at a time: Summarize waits until it is done.
+    public var isBusy: Bool {
+        if case .working = state { true } else { false }
+    }
+
     /// The user pressed Summarize or Regenerate. Nothing else ever starts a summary.
     public func summarize(_ id: UUID, with provider: ProviderConfig) {
         if case .working = state { return }
@@ -169,18 +176,21 @@ public final class MeetingSummarizer {
         }
         let lines = meeting.lines.map { line in "\(meeting.label(for: line).map { "\($0): " } ?? "")\(line.text)" }
         state = .working(id: id, step: 0, of: 1)
+        run += 1
+        let run = run
         pendingWork = Task { [weak self] in
             guard let self else { return }
             do {
-                let text = try await self.run(lines: lines, provider: provider, limit: provider.summaryChunkCharacters, id: id)
-                guard !Task.isCancelled else { return }
+                let text = try await self.run(lines: lines, provider: provider, limit: provider.summaryChunkCharacters, id: id, run: run)
+                // Cancelled, and perhaps replaced by another summary since: this one no longer has a say.
+                guard !Task.isCancelled, run == self.run else { return }
                 self.store.setSummary(id, MeetingSummary(text: text, provider: provider.name, isLocal: provider.isLocal, date: self.now()))
                 self.state = .idle
                 DebugLog.log("meeting: summarized (\(provider.kind.rawValue), \(provider.isLocal ? "local" : "cloud"))")
             } catch is CancellationError {
-                self.state = .idle
+                if run == self.run { self.state = .idle }
             } catch {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, run == self.run else { return }
                 let message = (error as? ProviderError)?.summary.replacingOccurrences(of: "No answer within 8 seconds", with: "No answer in time")
                     ?? (error as? SummaryFailure)?.message ?? "\(provider.name) couldn’t summarize this meeting."
                 self.state = .failed(id: id, message: message)
@@ -191,6 +201,7 @@ public final class MeetingSummarizer {
 
     public func cancel() {
         pendingWork?.cancel()
+        run += 1
         state = .idle
     }
 
@@ -206,19 +217,24 @@ public final class MeetingSummarizer {
 
     // MARK: the work
 
-    private func run(lines: [String], provider: ProviderConfig, limit: Int, id: UUID) async throws -> String {
+    private func show(_ step: Int, of total: Int, id: UUID, run: Int) throws {
+        try Task.checkCancellation()
+        guard run == self.run else { throw CancellationError() }
+        state = .working(id: id, step: step, of: total)
+    }
+
+    private func run(lines: [String], provider: ProviderConfig, limit: Int, id: UUID, run: Int) async throws -> String {
         do {
             let chunks = SummaryChunker.chunks(lines, limit: limit)
             if chunks.count == 1 {
-                state = .working(id: id, step: 0, of: 1)
+                try show(0, of: 1, id: id, run: run)
                 return try tidy(await ask(provider, system: SummaryPrompt.whole, user: SummaryPrompt.user(chunks[0])))
             }
             // Too long for one request: summarize the parts, then merge the summaries.
             let total = chunks.count + 1
             var parts: [String] = []
             for (index, chunk) in chunks.enumerated() {
-                try Task.checkCancellation()
-                state = .working(id: id, step: index, of: total)
+                try show(index, of: total, id: id, run: run)
                 parts.append(try tidy(await ask(provider, system: SummaryPrompt.part(index + 1, of: chunks.count), user: SummaryPrompt.user(chunk))))
             }
             // So many parts that their summaries do not fit either: merge them in groups first.
@@ -231,13 +247,17 @@ public final class MeetingSummarizer {
                 for group in groups { next.append(try tidy(await ask(provider, system: SummaryPrompt.combine, user: SummaryPrompt.userParts(group)))) }
                 merged = next
             }
-            try Task.checkCancellation()
-            state = .working(id: id, step: total - 1, of: total)
+            try show(total - 1, of: total, id: id, run: run)
             return try tidy(await ask(provider, system: SummaryPrompt.combine, user: SummaryPrompt.userParts(merged.joined(separator: "\n\n"))))
         } catch let error as ProviderError where Self.meansTooLong(error) && limit > 3_000 {
-            // The guess about this model's context was too generous. Start again in smaller pieces.
-            DebugLog.log("meeting: summary request too large at \(limit) characters, retrying smaller")
-            return try await run(lines: lines, provider: provider, limit: limit / 4, id: id)
+            // The guess about this model's context was too generous. Start again in smaller pieces,
+            // unless smaller pieces would be the very same requests: then the refusal is about something else.
+            let pieces = SummaryChunker.chunks(lines, limit: limit).count
+            var smaller = limit / 4
+            while smaller > 3_000, SummaryChunker.chunks(lines, limit: smaller).count == pieces { smaller /= 4 }
+            guard SummaryChunker.chunks(lines, limit: smaller).count > pieces else { throw error }
+            DebugLog.log("meeting: summary request too large at \(limit) characters, retrying at \(smaller)")
+            return try await self.run(lines: lines, provider: provider, limit: smaller, id: id, run: run)
         }
     }
 
