@@ -28,7 +28,7 @@ public final class DictationController {
     @ObservationIgnored private let insertion: any TextInsertionService
     @ObservationIgnored private let permissionsService: any PermissionsService
     @ObservationIgnored private let settings: SettingsStore
-    @ObservationIgnored private let cleanup: (any TextCleanupService)?
+    @ObservationIgnored private let router: CleanupRouter
     @ObservationIgnored private let history: HistoryStore?
     @ObservationIgnored private let stats: StatsStore?
     @ObservationIgnored private let dictionary: DictionaryStore?
@@ -42,6 +42,7 @@ public final class DictationController {
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private let insertedHold: Duration
     @ObservationIgnored private let errorHold: Duration
+    @ObservationIgnored private var noteHold: Duration { insertedHold * 3 }
     @ObservationIgnored private let silenceAfter: TimeInterval = 3
     @ObservationIgnored private let briefTake: TimeInterval = 1.5
     @ObservationIgnored private let doublePress: TimeInterval = 0.5
@@ -64,6 +65,9 @@ public final class DictationController {
         cleanup: (any TextCleanupService)? = nil,
         history: HistoryStore? = nil,
         stats: StatsStore? = nil,
+        providers: ProviderStore? = nil,
+        providerTransport: any ProviderTransport = NoProviderTransport(),
+        network: NetworkLog? = nil,
         dictionary: DictionaryStore? = nil,
         maxLengthScale: Double = 1,
         tapThreshold: TimeInterval = 0.4,
@@ -78,7 +82,7 @@ public final class DictationController {
         self.insertion = insertion
         self.permissionsService = permissions
         self.settings = settings
-        self.cleanup = cleanup
+        self.router = CleanupRouter(local: cleanup, providers: providers, settings: settings, transport: providerTransport, network: network)
         self.history = history
         self.stats = stats
         self.dictionary = dictionary
@@ -193,7 +197,24 @@ public final class DictationController {
 
     /// Whether Cleaned up mode can do anything right now, with the reason when it can't.
     public var cleanupAvailability: CleanupAvailability {
-        cleanup?.availability ?? .unavailable("No cleanup model in this build")
+        if let name = cleanupDestination?.cloudName { return .available(model: name) }
+        if case .localServer(let name) = cleanupDestination { return .available(model: name) }
+        return router.localAvailability
+    }
+
+    /// Apple Intelligence on its own, whatever provider is selected.
+    public var localCleanupAvailability: CleanupAvailability { router.localAvailability }
+
+    /// For setup: listing models, testing a provider, looking for servers on this Mac.
+    public var cleanupRouter: CleanupRouter { router }
+
+    /// Where the current take's clean-up will happen, or nil when it will not be cleaned up at all.
+    /// During a take this is about the app it started in; otherwise about any app.
+    public var cleanupDestination: CleanupDestination? {
+        guard settings.mode == .cleaned, settings.cleanupEnabled else { return nil }
+        let app = state == .idle ? nil : target
+        guard cleanupInstructions(for: app) != nil else { return nil }
+        return router.destination(for: app)
     }
 
     public func refreshPermissions() {
@@ -254,32 +275,30 @@ public final class DictationController {
 
         // A snippet trigger replaces the whole take and skips cleanup.
         if let dictionary, let snippet = TextProcessor.snippet(for: heard, in: dictionary.snippets) {
-            return await deliver(TextProcessor.expand(snippet.text, now: now()), copies: copies, token: token, raw: nil, mode: .raw, audioSeconds: seconds, measure: measure)
+            return await deliver(TextProcessor.expand(snippet.text, now: now()), copies: copies, token: token, raw: nil, mode: .raw, audioSeconds: seconds, measure: measure, note: nil)
         }
         let raw = dictionary.map { TextProcessor.applyDictionary($0.entries, to: heard, app: target?.name) } ?? heard
 
         // Cleanup is optional and never blocks a take: if it fails, the raw text goes in and is marked Raw.
         var text = raw
         var wasCleaned = false
-        if settings.mode == .cleaned, settings.cleanupEnabled, let cleanup, let instructions = cleanupInstructions(for: target) {
-            let began = now()
-            do {
-                text = try await cleanup.clean(raw, instructions: instructions)
+        var note: String?
+        if settings.mode == .cleaned, settings.cleanupEnabled, let instructions = cleanupInstructions(for: target), router.canClean(for: target) {
+            let result = await router.clean(raw, instructions: instructions, app: target)
+            if let cleaned = result.text {
+                text = cleaned
                 wasCleaned = true
-                DebugLog.log("cleanup done in \(Int(now().timeIntervalSince(began) * 1000)) ms\(text == raw ? ", no change" : "")")
-            } catch {
-                // Only the kind of failure: a model error can quote the transcript.
-                let kind = String(describing: error).prefix { $0 != "(" && $0 != ":" }
-                DebugLog.log("cleanup failed after \(Int(now().timeIntervalSince(began) * 1000)) ms: \(type(of: error)).\(kind)")
             }
+            note = result.note
             guard token == stateToken else { return }
+        } else if settings.mode == .cleaned, !settings.cleanupEnabled {
+            DebugLog.log("cleanup skipped: switched off")
         }
-        if settings.mode == .cleaned, text == raw, !(settings.cleanupEnabled && cleanup != nil) { DebugLog.log("cleanup skipped: switched off") }
-        await deliver(text, copies: copies, token: token, raw: text == raw ? nil : raw, mode: wasCleaned ? .cleaned : .raw, audioSeconds: seconds, measure: measure)
+        await deliver(text, copies: copies, token: token, raw: text == raw ? nil : raw, mode: wasCleaned ? .cleaned : .raw, audioSeconds: seconds, measure: measure, note: note)
     }
 
-    private func deliver(_ text: String, copies: Bool, token: Int, raw: String?, mode: DictationMode, audioSeconds: Double, measure: TakeMeasure) async {
-        guard copies else { return await insert(text, token: token, raw: raw, mode: mode, audioSeconds: audioSeconds, measure: measure) }
+    private func deliver(_ text: String, copies: Bool, token: Int, raw: String?, mode: DictationMode, audioSeconds: Double, measure: TakeMeasure, note: String?) async {
+        guard copies else { return await insert(text, token: token, raw: raw, mode: mode, audioSeconds: audioSeconds, measure: measure, note: note) }
         // Nothing is typed, so there is nothing to undo and no password field to worry about.
         let app = target?.name ?? "the front app"
         copyToClipboard(text)
@@ -291,8 +310,8 @@ public final class DictationController {
             retention: settings.retention)
         count(measure, text: text, outcome: .copied)
         guard token == stateToken else { return }
-        let held = set(.inserted(InsertionSummary(appName: app, wordCount: WordCount.count(text), copied: true)))
-        returnToIdle(after: insertedHold, ifStill: held)
+        let held = set(.inserted(InsertionSummary(appName: app, wordCount: WordCount.count(text), copied: true, note: note)))
+        returnToIdle(after: note == nil ? insertedHold : max(insertedHold, noteHold), ifStill: held)
     }
 
     /// The cleanup instructions for a take into this app, or nil when a per-app rule says to leave it raw.
@@ -322,7 +341,7 @@ public final class DictationController {
             recordingSeconds: measure.recordingSeconds, waitSeconds: max(0, landed.timeIntervalSince(measure.stoppedAt)), outcome: outcome))
     }
 
-    private func insert(_ text: String, token: Int, raw: String? = nil, mode: DictationMode? = nil, audioSeconds: Double = 0, measure: TakeMeasure? = nil) async {
+    private func insert(_ text: String, token: Int, raw: String? = nil, mode: DictationMode? = nil, audioSeconds: Double = 0, measure: TakeMeasure? = nil, note: String? = nil) async {
         // Checked at the last moment: the user may have tabbed into a password field while speaking.
         guard !insertion.isSecureInputActive else { return fail(.secureInput, ifStill: token) }
         let app = target?.name ?? "the front app"
@@ -338,8 +357,9 @@ public final class DictationController {
             count(measure, text: text, outcome: .inserted)
             guard token == stateToken else { return }
             let words = WordCount.count(text)
-            let held = set(.inserted(InsertionSummary(appName: app, wordCount: words)))
-            returnToIdle(after: insertedHold, ifStill: held)
+            let held = set(.inserted(InsertionSummary(appName: app, wordCount: words, note: note)))
+            // A take that did not go the way it was set up stays on screen long enough to read why.
+            returnToIdle(after: note == nil ? insertedHold : max(insertedHold, noteHold), ifStill: held)
         } catch {
             // The insertion service leaves the text on the clipboard when it cannot place it.
             lastReceipt = nil

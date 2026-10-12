@@ -15,6 +15,8 @@ public nonisolated struct InsertionSummary: Equatable, Sendable {
     public var wordCount: Int
     /// "Copy instead": the text went to the clipboard, not into the app.
     public var copied = false
+    /// Set when the chosen AI provider did not do the clean-up: "Claude didn’t answer, cleaned up on this Mac".
+    public var note: String?
 }
 
 public nonisolated struct Transcription: Equatable, Sendable {

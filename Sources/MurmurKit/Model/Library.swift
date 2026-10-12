@@ -114,10 +114,17 @@ public nonisolated struct NetworkLogEntry: Codable, Equatable, Identifiable, Sen
     public var date: Date
     public var host: String
     public var reason: String
+    /// Bytes sent for a provider request; the size of the download otherwise.
     public var bytes: Int
+    /// Bytes that came back from a provider.
+    public var received: Int?
+    /// The request stayed on this Mac (a local model server).
+    public var isLocal: Bool?
+    /// Text went to an AI provider, rather than a file coming down.
+    public var isProvider: Bool?
 }
 
-/// A local record of every request the app makes: model downloads and update checks, nothing else.
+/// A local record of every request the app makes: model downloads, update checks and AI provider requests.
 @Observable
 public final class NetworkLog {
     @ObservationIgnored private let defaults: UserDefaults
@@ -128,8 +135,15 @@ public final class NetworkLog {
         entries = defaults.data(forKey: "networkLog").flatMap { try? JSONDecoder().decode([NetworkLogEntry].self, from: $0) } ?? []
     }
 
-    public func record(host: String, reason: String, bytes: Int, date: Date = Date()) {
-        entries.insert(NetworkLogEntry(date: date, host: host, reason: reason, bytes: bytes), at: 0)
+    public func record(host: String, reason: String, bytes: Int, received: Int? = nil, isLocal: Bool? = nil, isProvider: Bool? = nil, date: Date = Date()) {
+        entries.insert(NetworkLogEntry(date: date, host: host, reason: reason, bytes: bytes, received: received, isLocal: isLocal, isProvider: isProvider), at: 0)
+        // Enough to look back over, without the log growing with every take for ever.
+        if entries.count > 500 { entries.removeLast(entries.count - 500) }
+    }
+
+    /// Bytes of text sent to providers that are not on this Mac.
+    public var bytesSentToCloud: Int {
+        entries.filter { $0.isProvider == true && $0.isLocal != true }.reduce(0) { $0 + $1.bytes }
     }
 
     public func clear() { entries = [] }

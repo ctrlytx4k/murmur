@@ -242,7 +242,8 @@ import Testing
         panels.open = .mode
         panels.collapseSoon()
         #expect(panels.open == .mode)
-        try await Task.sleep(for: .milliseconds(400))
+        // Polls, so a busy machine does not fail it.
+        for _ in 0..<200 where panels.open != nil { try await Task.sleep(for: .milliseconds(10)) }
         #expect(panels.open == nil)
     }
 }
