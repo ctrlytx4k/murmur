@@ -86,9 +86,6 @@ public nonisolated enum CleanupPreset: String, CaseIterable, Sendable {
 public final class SettingsStore {
     public enum Behavior: String, Sendable { case pushToTalk, toggle }
     public enum Appearance: String, Sendable { case auto, light, dark }
-    public enum OverlayPosition: String, CaseIterable, Sendable { case bottom = "Bottom of screen", top = "Top of screen"
-        public var detail: String { self == .bottom ? "64 pt above the Dock" : "Just below the menu bar" }
-    }
     public enum SoundSet: String, CaseIterable, Sendable { case soft = "Soft", click = "Click", chime = "Chime" }
     public enum Retention: String, CaseIterable, Sendable { case never = "Don’t keep", week = "7 days", month = "30 days", quarter = "90 days", forever = "Forever"
         public var days: Int? {
@@ -119,7 +116,6 @@ public final class SettingsStore {
     public var showInDock: Bool { didSet { save(showInDock, "showInDock") } }
     public var soundsEnabled: Bool { didSet { save(soundsEnabled, "soundsEnabled") } }
     public var soundSet: SoundSet { didSet { save(soundSet.rawValue, "soundSet") } }
-    public var overlayPosition: OverlayPosition { didSet { save(overlayPosition.rawValue, "overlayPosition") } }
     public var accent: Accent { didSet { save(accent.rawValue, "accent"); Accent.current = accent } }
     public var appearance: Appearance { didSet { save(appearance.rawValue, "appearance") } }
     /// Nil means "follow the system default input".
@@ -133,6 +129,12 @@ public final class SettingsStore {
     /// Where onboarding got to. macOS quits an app when some permissions are switched in System Settings,
     /// so on the next launch onboarding picks up at the same step instead of starting over.
     public var onboardingStep: Int { didSet { save(onboardingStep, "onboardingStep") } }
+
+    // Overlay
+    public var overlay: OverlayAppearance { didSet {
+        let allowed = overlay.clamped
+        if allowed != overlay { overlay = allowed } else { saveCodable(overlay, "overlayAppearance") }
+    } }
 
     // Hotkeys
     public var shortcut: Shortcut { didSet { saveCodable(shortcut, "shortcut") } }
@@ -196,7 +198,6 @@ public final class SettingsStore {
         showInDock = bool("showInDock", false)
         soundsEnabled = bool("soundsEnabled", true)
         soundSet = raw("soundSet", .soft)
-        overlayPosition = raw("overlayPosition", .bottom)
         accent = raw("accent", .ice)
         // Light is the default design; dark and Auto are there for people who ask for them.
         appearance = raw("appearance", .light)
@@ -204,6 +205,15 @@ public final class SettingsStore {
         microphoneName = defaults.string(forKey: "microphoneName")
         hasCompletedOnboarding = bool("hasCompletedOnboarding", false)
         onboardingStep = defaults.integer(forKey: "onboardingStep")
+
+        if defaults.data(forKey: "overlayAppearance") == nil {
+            // The position used to live in General under its own key. Carry it over once, then drop the old key.
+            var migrated = OverlayAppearance()
+            if defaults.string(forKey: "overlayPosition") == "Top of screen" { migrated.position = .top }
+            defaults.set(try? JSONEncoder().encode(migrated), forKey: "overlayAppearance")
+            defaults.removeObject(forKey: "overlayPosition")
+        }
+        overlay = codable("overlayAppearance", OverlayAppearance())
 
         shortcut = codable("shortcut", .rightOption)
         behavior = raw("behavior", .pushToTalk)
@@ -245,7 +255,7 @@ public final class SettingsStore {
     public func resetAll() {
         let fresh = SettingsStore(defaults: UserDefaults(suiteName: "murmur-defaults-\(UUID().uuidString)")!)
         showInDock = fresh.showInDock; soundsEnabled = fresh.soundsEnabled; soundSet = fresh.soundSet
-        overlayPosition = fresh.overlayPosition; accent = fresh.accent; appearance = fresh.appearance
+        overlay = OverlayAppearance(); accent = fresh.accent; appearance = fresh.appearance
         microphoneID = nil
         shortcut = fresh.shortcut; behavior = fresh.behavior; doubleTapToLock = fresh.doubleTapToLock
         cycleModeShortcut = fresh.cycleModeShortcut; reinsertShortcut = fresh.reinsertShortcut
@@ -270,6 +280,7 @@ public final class SettingsStore {
             "cleanup": cleanupEnabled ? cleanupPreset.rawValue : "off", "insertBy": insertMethod.rawValue,
             "restoresClipboard": String(restoresClipboard), "offlineMode": String(offlineMode),
             "retention": retention.rawValue, "keepStats": String(keepStats), "appearance": appearance.rawValue, "accent": accent.rawValue,
+            "overlay": "\(overlay.material.rawValue) \(overlay.size.rawValue) \(overlay.position.rawValue)",
         ]
     }
 

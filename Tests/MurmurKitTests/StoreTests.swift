@@ -14,7 +14,7 @@ import Testing
         #expect(settings.mode == .raw && !settings.cleanupEnabled && settings.cleanupPreset == .lightTouch)
         #expect(settings.modelID == "apple-speech" && settings.language == "English")
         #expect(settings.insertMethod == .pasting && settings.restoresClipboard && settings.addsTrailingSpace)
-        #expect(settings.overlayPosition == .bottom)
+        #expect(settings.overlay == OverlayAppearance() && settings.overlay.position == .bottom)
         #expect(!settings.offlineMode && settings.retention == .month)
         #expect(!settings.hasCompletedOnboarding && settings.microphoneID == nil)
         Accent.current = .ice
@@ -26,7 +26,7 @@ import Testing
         d.set("command", forKey: "mode")
         d.set("not-a-preset", forKey: "cleanupPreset")
         let settings = SettingsStore(defaults: d)
-        #expect(settings.overlayPosition == .bottom)
+        #expect(settings.overlay.position == .bottom)
         #expect(settings.mode == .raw)
         #expect(settings.cleanupPreset == .lightTouch)
         Accent.current = .ice
@@ -57,7 +57,7 @@ import Testing
         settings.customInstructions = "Be brief."
         settings.appPresets = [AppPreset(bundleIdentifier: "com.apple.mail", name: "Mail", preset: "raw")]
         settings.language = "German"
-        settings.overlayPosition = .top
+        settings.overlay.position = .top
         settings.retention = .forever
         settings.offlineMode = true
         settings.insertMethod = .typing
@@ -68,7 +68,7 @@ import Testing
         #expect(reopened.shortcut == .optionSpace && reopened.behavior == .toggle)
         #expect(reopened.mode == .cleaned && reopened.cleanupEnabled && reopened.cleanupPreset == .notes)
         #expect(reopened.customInstructions == "Be brief." && reopened.appPresets.first?.name == "Mail")
-        #expect(reopened.language == "German" && reopened.overlayPosition == .top)
+        #expect(reopened.language == "German" && reopened.overlay.position == .top)
         #expect(reopened.retention == .forever && reopened.offlineMode)
         #expect(reopened.insertMethod == .typing && reopened.maxLength == .fifteen && reopened.onboardingStep == 3)
         Accent.current = .ice
