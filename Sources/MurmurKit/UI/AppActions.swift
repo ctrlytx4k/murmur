@@ -5,6 +5,7 @@ struct AppActions {
     var openSettings: (SettingsPane?) -> Void = { _ in }
     var openHistory: () -> Void = {}
     var openOverview: () -> Void = {}
+    var openMeetings: () -> Void = {}
     var openOnboarding: (Permission?) -> Void = { _ in }
     var showAbout: () -> Void = {}
     var showAcknowledgements: () -> Void = {}

@@ -60,6 +60,44 @@ final class DemoPermissions: PermissionsService {
     }
 }
 
+/// A meeting recorder that records nothing: the level moves, and Stop hands back a short "recording".
+final class DemoMeetingAudio: MeetingAudioService {
+    private var timer: Timer?
+    private var started = Date()
+    private var onLevel: ((Float) -> Void)?
+
+    func start(microphone: URL, call: URL?, microphoneID: String?, onLevel: @escaping (Float) -> Void) throws {
+        started = Date()
+        self.onLevel = onLevel
+        // Empty files stand in for the tracks, so the rest of the flow finds what it expects.
+        FileManager.default.createFile(atPath: microphone.path, contents: nil)
+        if let call { FileManager.default.createFile(atPath: call.path, contents: nil) }
+        let timer = Timer(timeInterval: 0.08, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.onLevel?(Float.random(in: 0.1...0.8)) }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    func stop() -> MeetingRecording {
+        timer?.invalidate()
+        timer = nil
+        return MeetingRecording(duration: Date().timeIntervalSince(started))
+    }
+
+    func requestSystemAudio() {}
+}
+
+/// A track with two bursts of "speech", so the demo transcript has a few lines.
+nonisolated struct DemoMeetingTrack: MeetingTrack {
+    var offset = 0.0
+    func levels() async throws -> [Float] {
+        let quiet = [Float](repeating: 0, count: Int(1 / SpeechSegmenter.frame)), speech = [Float](repeating: 0.1, count: Int(2 / SpeechSegmenter.frame))
+        return [Float](repeating: 0, count: Int(offset / SpeechSegmenter.frame)) + speech + quiet + quiet + quiet + speech + quiet
+    }
+    func clip(from start: Double, to end: Double) async throws -> AudioClip { AudioClip(samples: []) }
+}
+
 /// Drops filler words and tidies casing, so Cleaned up mode has something to show in the demo.
 final class DemoCleanup: TextCleanupService {
     let availability = CleanupAvailability.available(model: "demo-cleanup")
@@ -78,7 +116,32 @@ final class DemoCleanup: TextCleanupService {
 
 /// The sample content from the mockups, used only with `--demo` and for snapshots.
 enum DemoData {
+    /// The meetings on the Meetings board.
+    static func meetings(now: Date = Date()) -> [Meeting] {
+        let calendar = Calendar.current
+        func at(_ daysAgo: Int, _ hour: Int, _ minute: Int) -> Date {
+            let day = calendar.date(byAdding: .day, value: -daysAgo, to: calendar.startOfDay(for: now)) ?? now
+            return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day) ?? day
+        }
+        var review = Meeting(title: "Design review", date: at(0, 9, 30), duration: 32 * 60, includesCallAudio: true)
+        review.setTranscript([
+            MeetingLine(start: 60, speaker: .you, text: "Okay so um let’s start with the onboarding flow. Did everyone get a chance to look at the uh new mockups?"),
+            MeetingLine(start: 85, speaker: .others, text: "Yes. The language step is good, but the engine step feels heavy for first-time users."),
+            MeetingLine(start: 180, speaker: .others, text: "We could pick the engine automatically and only show the choice in settings."),
+            MeetingLine(start: 840, speaker: .you, text: "Let’s do that. Priya, can you update the flow by Thursday?"),
+        ], engine: "parakeet-v3")
+        review.hasAudio = false
+        var oneOnOne = Meeting(title: "1:1 with Sam", date: at(0, 8, 45), duration: 18 * 60, includesCallAudio: true)
+        oneOnOne.setTranscript([MeetingLine(start: 5, speaker: .you, text: "Morning. How did the release go?")], engine: "parakeet-v3")
+        oneOnOne.hasAudio = false
+        var sync = Meeting(title: "Beta launch sync", date: at(1, 15, 0), duration: 41 * 60, includesCallAudio: true)
+        sync.setTranscript([MeetingLine(start: 12, speaker: .others, text: "Let’s go through the launch checklist.")], engine: "parakeet-v3")
+        sync.hasAudio = false
+        return [review, oneOnOne, sync]
+    }
+
     static func seed(_ stores: Stores) {
+        if stores.meetings.meetings.isEmpty { meetings().forEach(stores.meetings.add) }
         if stores.dictionary.entries.isEmpty {
             stores.dictionary.entries = [
                 ("kube cuttle", "kubectl", "All apps"), ("post gres", "Postgres", "All apps"), ("jason", "JSON", "Xcode, Terminal"),

@@ -11,11 +11,13 @@ public final class Stores {
     public let providers: ProviderStore
     public let network: NetworkLog
     public let catalog: ModelCatalog
+    public let meetings: MeetingStore
+    public let meeting: MeetingController
     /// True with `--demo`: simulated services and sample data.
     public let isDemo: Bool
     let overlay = OverlayPanelState()
 
-    public init(controller: DictationController, settings: SettingsStore, dictionary: DictionaryStore, history: HistoryStore, stats: StatsStore, providers: ProviderStore, network: NetworkLog, catalog: ModelCatalog, isDemo: Bool) {
+    public init(controller: DictationController, settings: SettingsStore, dictionary: DictionaryStore, history: HistoryStore, stats: StatsStore, providers: ProviderStore, network: NetworkLog, catalog: ModelCatalog, meetings: MeetingStore, meeting: MeetingController, isDemo: Bool) {
         self.controller = controller
         self.settings = settings
         self.dictionary = dictionary
@@ -24,6 +26,8 @@ public final class Stores {
         self.providers = providers
         self.network = network
         self.catalog = catalog
+        self.meetings = meetings
+        self.meeting = meeting
         self.isDemo = isDemo
     }
 }

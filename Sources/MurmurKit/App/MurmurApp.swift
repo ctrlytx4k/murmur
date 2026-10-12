@@ -6,6 +6,7 @@ import SwiftUI
 ///   --onboarding         show onboarding even if it was completed
 ///   --snapshots <dir>    render every screen to PNG files and exit
 ///   --selftest <audio>   transcribe a file with both real engines, print the result, and exit
+///   --meetingtest <mic> [call]  run audio files through the meeting pipeline with the real engine, print the transcript, and exit
 ///   --matrix <file>      type a test sentence into Notes, Terminal, Safari and Chrome and write what happened
 ///   --icon <png>         draw the app icon at 1024 px, for scripts/icon.sh
 ///   --tour               with --demo: open each surface in turn, then quit (a smoke test)
@@ -40,6 +41,11 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             SelfTest.run(clip: delegate.arguments[index + 1])
             return
         }
+        if let index = delegate.arguments.firstIndex(of: "--meetingtest"), delegate.arguments.count > index + 1 {
+            let call = delegate.arguments.count > index + 2 ? delegate.arguments[index + 2] : nil
+            SelfTest.runMeeting(microphone: delegate.arguments[index + 1], call: call)
+            return
+        }
         if let index = delegate.arguments.firstIndex(of: "--snapshots"), delegate.arguments.count > index + 1 {
             Snapshots.render(to: URL(fileURLWithPath: delegate.arguments[index + 1]))
             return
@@ -72,13 +78,19 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         // The demo never touches the Keychain or the network.
         let providers = ProviderStore(defaults: defaults, keys: demo ? MemoryKeyStore() : KeychainKeyStore())
         let catalog: ModelCatalog
+        let meetings: MeetingStore
+        let meeting: MeetingController
         if demo {
+            meetings = MeetingStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("murmur-demo-meetings-\(UUID().uuidString)"))
             // Simulated services: nothing is recorded and nothing is typed.
             controller = DictationController(
                 audio: DemoAudio(), engine: DemoEngine(), insertion: DemoInsertion(), permissions: DemoPermissions(),
                 settings: settings, cleanup: DemoCleanup(), history: history, stats: stats, providers: providers, network: network, dictionary: dictionary,
                 frontmostApp: { DictationController.systemFrontmostApp() ?? TargetApp(name: "Notes", bundleIdentifier: "com.apple.Notes") })
             catalog = ModelCatalog(parakeetStatus: .available)
+            meeting = MeetingController(
+                audio: DemoMeetingAudio(), engine: DemoEngine(), store: meetings, settings: settings, permissions: DemoPermissions(),
+                openTrack: { DemoMeetingTrack(offset: $0.lastPathComponent == "call.caf" ? 2.5 : 0) })
         } else {
             let router = EngineRouter(settings: settings)
             let audio = LiveAudioCapture()
@@ -93,6 +105,8 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             catalog.onDownload = { [weak self] _ in self?.prepareParakeet(download: true) }
             catalog.onPrepareLanguage = { [weak self] in self?.prepareLanguage() }
             self.router = router
+            meetings = MeetingStore()
+            meeting = MeetingController(audio: LiveMeetingAudio(), engine: router, store: meetings, settings: settings, permissions: LivePermissionsService())
 
             let hotkeys = LiveHotkeyService()
             hotkeys.onEvent = { [weak self] event in self?.handle(event) }
@@ -101,7 +115,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         }
         stores = Stores(
             controller: controller, settings: settings, dictionary: dictionary, history: history, stats: stats, providers: providers,
-            network: network, catalog: catalog, isDemo: demo)
+            network: network, catalog: catalog, meetings: meetings, meeting: meeting, isDemo: demo)
         router?.apple.onAssetDownload = { [weak self] in
             guard let self, self.settings.logsNetworkActivity else { return }
             self.stores.network.record(host: "Apple (via macOS)", reason: "Speech language download", bytes: 0)
@@ -119,6 +133,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             openSettings: { [weak self] pane in self?.showSettings(pane) },
             openHistory: { [weak self] in self?.showMain(.history) },
             openOverview: { [weak self] in self?.showMain(.overview) },
+            openMeetings: { [weak self] in self?.showMain(.meetings) },
             openOnboarding: { [weak self] permission in self?.showOnboarding(at: permission.map(OnboardingStep.step(for:)) ?? .welcome) },
             showAbout: { [weak self] in self?.showAbout() },
             showAcknowledgements: { [weak self] in self?.showAcknowledgements() },
@@ -188,6 +203,15 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         print("tour: overview counts \(stores.stats.rows.count) takes, \(Stats.summary(rows: stores.stats.rows, period: .week, today: Stats.today(), typingWPM: settings.typingWPM).words) words in the last 7 days")
         showMain(.history)
         await pause(1.5)
+        showMain(.meetings)
+        stores.meeting.start()
+        await pause(1.2)
+        let recordingMeeting = stores.meeting.state.isRecording
+        stores.meeting.stop()
+        await stores.meeting.pendingWork?.value
+        let recorded = stores.meeting.latest.flatMap { stores.meetings.meeting($0) }
+        print("tour: meeting recorded \(recordingMeeting), transcribed \(recorded?.isTranscribed == true) with \(recorded?.lines.count ?? 0) lines, audio deleted \(recorded?.hasAudio == false)")
+        await pause(1)
         showOnboarding(at: .microphone)
         await pause(2)
         print("tour finished in state \(controller.state)")
@@ -197,6 +221,8 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
     public func applicationWillTerminate(_ notification: Notification) {
         // A take from the last couple of seconds may still have its text on the clipboard.
         insertion?.flushRestore()
+        // A meeting being recorded is closed and kept, to be transcribed next time.
+        stores?.meeting.stopForQuit()
     }
 
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -356,6 +382,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
 
     @objc private func showOverview() { showMain(.overview) }
     @objc private func showHistory() { showMain(.history) }
+    @objc private func showMeetings() { showMain(.meetings) }
 
     /// The main window: Overview and History as two tabs.
     private func showMain(_ tab: MainTab) {
@@ -432,6 +459,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         app.addItem(withTitle: "Settings…", action: #selector(showSettingsFromMenu), keyEquivalent: ",").target = self
         app.addItem(withTitle: "Overview", action: #selector(showOverview), keyEquivalent: "1").target = self
         app.addItem(withTitle: "History", action: #selector(showHistory), keyEquivalent: "y").target = self
+        app.addItem(withTitle: "Meetings", action: #selector(showMeetings), keyEquivalent: "").target = self
         app.addItem(.separator())
         app.addItem(withTitle: "Quit Murmur", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         main.addItem(submenuItem(app))

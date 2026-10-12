@@ -1,14 +1,14 @@
 import Observation
 import SwiftUI
 
-enum MainTab: Hashable { case overview, history }
+enum MainTab: Hashable { case overview, history, meetings }
 
 @Observable
 final class MainNavigation {
     var tab = MainTab.overview
 }
 
-/// The main window: Overview, with History as its second tab. 1144 x 800.
+/// The main window: Overview, History and Meetings as tabs. 1144 x 800.
 struct MainWindowView: View {
     let stores: Stores
     let navigation: MainNavigation
@@ -19,11 +19,12 @@ struct MainWindowView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            RectSegments(options: [(MainTab.overview, "Overview"), (MainTab.history, "History")], selection: bind(navigation, \.tab), label: "View")
+            RectSegments(options: [(MainTab.overview, "Overview"), (MainTab.history, "History"), (MainTab.meetings, "Meetings")], selection: bind(navigation, \.tab), label: "View")
                 .frame(height: 52)
             switch navigation.tab {
             case .overview: OverviewView(stores: stores, today: today, hovered: hoveredBar, showsTable: showsTable)
             case .history: HistoryView(stores: stores)
+            case .meetings: MeetingsView(stores: stores)
             }
         }
         .frame(width: 1144, height: 800)

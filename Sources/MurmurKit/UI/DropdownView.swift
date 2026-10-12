@@ -25,6 +25,7 @@ struct DropdownView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            meetingRow
             mainButton
             if controller.state.isRecording { liveCard } else { statsStrip }
             modePicker
@@ -44,6 +45,42 @@ struct DropdownView: View {
     }
 
     private var divider: some View { Rectangle().fill(Tokens.separator).frame(height: 1) }
+
+    /// A meeting being recorded or transcribed is always one click away, whatever window is open.
+    @ViewBuilder private var meetingRow: some View {
+        let meeting = stores.meeting
+        if !meeting.state.isIdle {
+            HStack(spacing: 9) {
+                switch meeting.state {
+                case .recording(let since):
+                    PulseDot()
+                    Text("Recording meeting").font(.mmBodyEmphasis)
+                    ElapsedTime(since: since).font(.mmMono).foregroundStyle(Tokens.labelSecondary)
+                    Spacer(minLength: 0)
+                    Button("Stop") {
+                        meeting.stop()
+                        actions.closeDropdown()
+                        actions.openMeetings()
+                    }
+                    .buttonStyle(MurmurButtonStyle(kind: .recording, height: 24, fontSize: 12))
+                case .transcribing(_, let progress):
+                    Spinner()
+                    Text("Transcribing meeting · \(Int(progress * 100))%").font(.mmBodyEmphasis).monospacedDigit()
+                    Spacer(minLength: 0)
+                    Button("Open") {
+                        actions.closeDropdown()
+                        actions.openMeetings()
+                    }
+                    .buttonStyle(MurmurButtonStyle(height: 24, fontSize: 12))
+                case .idle: EmptyView()
+                }
+            }
+            .padding(.horizontal, 12).frame(height: 40)
+            .background(Tokens.chip, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Tokens.stroke, lineWidth: 0.5))
+            .padding(.bottom, 6)
+        }
+    }
 
     // MARK: header
 
@@ -325,6 +362,7 @@ struct DropdownView: View {
     private var links: some View {
         HStack(spacing: 2) {
             link("History", "clock") { actions.openHistory() }
+            link("Meetings", "person.2") { actions.openMeetings() }
             link("Dictionary", "character.book.closed") { actions.openSettings(.dictionary) }
             link("Snippets", "curlybraces") { actions.openSettings(.dictionary) }
             link("Settings", "gearshape") { actions.openSettings(nil) }

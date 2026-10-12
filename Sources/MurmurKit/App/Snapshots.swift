@@ -34,9 +34,13 @@ enum Snapshots {
             controller.loadPreview(
                 state: state, target: notes, levels: state.isRecording ? (silent ? nil : levels) : nil,
                 isSilent: silent, last: last, canUndo: last != nil, permissions: permissions, deviceNotice: notice)
+            let meetings = MeetingStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("murmur-snapshots-\(UUID().uuidString)"))
+            let meeting = MeetingController(
+                audio: DemoMeetingAudio(), engine: DemoEngine(), store: meetings, settings: settings, permissions: DemoPermissions(permissions),
+                openTrack: { _ in DemoMeetingTrack() })
             let stores = Stores(
                 controller: controller, settings: settings, dictionary: DictionaryStore(defaults: defaults), history: history, stats: StatsStore(defaults: defaults), providers: providers,
-                network: NetworkLog(defaults: defaults), catalog: ModelCatalog(parakeetStatus: .available), isDemo: !empty)
+                network: NetworkLog(defaults: defaults), catalog: ModelCatalog(parakeetStatus: .available), meetings: meetings, meeting: meeting, isDemo: !empty)
             if !empty {
                 DemoData.seed(stores)
                 // The day the Stats board was drawn on, so the numbers can be checked against it.
@@ -157,6 +161,20 @@ enum Snapshots {
         settingsShot("settings-privacy", st, .privacy)
         settingsShot("settings-advanced", st, .advanced)
         mainShot("history", st, .history)
+        // Meetings: the recorder, a recording in progress, and a transcribed meeting.
+        mainShot("meetings-recorder", st, .meetings)
+        add("meetings-transcript", MainWindowMeeting(stores: st, selection: st.meetings.meetings.first?.id))
+        do {
+            let live = make(.idle)
+            live.meeting.start()
+            add("meetings-recording", MainWindowMeeting(stores: live, selection: nil))
+            add("dropdown-meeting-recording", DropdownView(stores: live, statsToday: statsDay))
+            let waiting = make(.idle, empty: true)
+            var failed = Meeting(title: "Meeting, 9:30 AM", date: Date().addingTimeInterval(-3600), duration: 754, includesCallAudio: true)
+            failed.problem = "The speech model (parakeet-v3) is still downloading."
+            waiting.meetings.add(failed)
+            add("meetings-not-transcribed", MainWindowMeeting(stores: waiting, selection: failed.id))
+        }
         mainShot("overview", st, .overview, hovered: 8)
         mainShot("overview-table", st, .overview, table: true)
         // Bring your own provider: the pane with a cloud provider in use, the three sheets and the overlay.
@@ -201,6 +219,7 @@ enum Snapshots {
         st = make(.idle, empty: true)
         settingsShot("settings-dictionary-empty", st, .dictionary)
         mainShot("history-empty", st, .history)
+        mainShot("meetings-empty", st, .meetings)
         mainShot("overview-empty", st, .overview)
         add("dropdown-first-run", DropdownView(stores: st))
         st = make(.idle, empty: true)
@@ -228,7 +247,7 @@ enum Snapshots {
                 ("light", NSAppearance.Name.aqua, NSColor(srgbRed: 0.87, green: 0.90, blue: 0.96, alpha: 1)),
                 ("dark", NSAppearance.Name.darkAqua, NSColor(srgbRed: 0.09, green: 0.10, blue: 0.19, alpha: 1)),
             ] {
-                let isWindow = ["settings", "onboarding", "history", "overview", "sheet", "dialog-update"].contains { name.hasPrefix($0) }
+                let isWindow = ["settings", "onboarding", "history", "overview", "meetings", "sheet", "dialog-update"].contains { name.hasPrefix($0) }
                 let content = view
                     .clipShape(RoundedRectangle(cornerRadius: isWindow ? Tokens.Radius.window : 0, style: .continuous))
                     .padding(28)
@@ -238,6 +257,22 @@ enum Snapshots {
             }
         }
         print("Wrote \(shots.count * 2) snapshots to \(directory.path)")
+    }
+
+    /// The main window on its Meetings tab, with a chosen meeting open.
+    private struct MainWindowMeeting: View {
+        let stores: Stores
+        let selection: UUID?
+        var body: some View {
+            VStack(spacing: 0) {
+                RectSegments(options: [(MainTab.overview, "Overview"), (MainTab.history, "History"), (MainTab.meetings, "Meetings")], selection: .constant(.meetings), label: "View")
+                    .frame(height: 52)
+                MeetingsView(stores: stores, selection: selection)
+            }
+            .frame(width: 1144, height: 800)
+            .background(Tokens.windowBackground)
+            .foregroundStyle(Tokens.label)
+        }
     }
 
     /// The app icon as a 1024 px PNG: the same tile the interface draws, inside the usual margin.
