@@ -95,6 +95,12 @@ struct Harness {
     func settle() async {
         await controller.pendingWork?.value
     }
+
+    /// Waits for the short holds on "inserted" and on errors to run out. Polls, so a busy machine does not fail it.
+    func becomesIdle() async -> Bool {
+        for _ in 0..<200 where controller.state != .idle { try? await Task.sleep(for: .milliseconds(10)) }
+        return controller.state == .idle
+    }
 }
 
 @MainActor
@@ -116,8 +122,7 @@ struct Harness {
         #expect(h.controller.lastTranscription?.text == "hello there world")
         #expect(h.controller.canUndoLast)
 
-        try await Task.sleep(for: .milliseconds(80))
-        #expect(h.controller.state == .idle)
+        #expect(await h.becomesIdle())
     }
 
     @Test func pushToTalkFollowsKeyDownAndUp() async {
@@ -332,12 +337,12 @@ struct Harness {
         #expect(CleanupCheck.tidy("<transcript>\n“Hello there.”  \n</transcript>") == "Hello there.")
     }
 
-    @Test func errorsClearThemselves() async throws {
+    @Test func errorsClearThemselves() async {
         let h = Harness()
         h.permissions.current.microphone = false
         h.controller.start()
-        try await Task.sleep(for: .milliseconds(80))
-        #expect(h.controller.state == .idle)
+        #expect(h.controller.state == .error(.microphoneDenied))
+        #expect(await h.becomesIdle())
     }
 
     @Test func undoIsOfferedOnceAndCopyUsesTheLastText() async {
