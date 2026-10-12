@@ -6,11 +6,14 @@ import ApplicationServices
 enum CaretLocator {
     /// The caret in AppKit screen coordinates (origin at the bottom left of the main display).
     static func caretRect() -> CGRect? {
-        let system = AXUIElementCreateSystemWide()
+        // Asked of the app in front, not system-wide: a timeout set on the system-wide element would shorten
+        // every Accessibility call Murmur makes from then on, including the check that Undo relies on.
+        guard let front = NSWorkspace.shared.frontmostApplication else { return nil }
+        let app = AXUIElementCreateApplication(front.processIdentifier)
         // An app that is slow to answer must not hold up the start of a take.
-        AXUIElementSetMessagingTimeout(system, 0.25)
+        AXUIElementSetMessagingTimeout(app, 0.25)
         var focused: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
               let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return nil }
         let element = focused as! AXUIElement
         AXUIElementSetMessagingTimeout(element, 0.25)
