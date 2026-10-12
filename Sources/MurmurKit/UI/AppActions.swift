@@ -7,6 +7,7 @@ struct AppActions {
     var openOnboarding: (Permission?) -> Void = { _ in }
     var showAbout: () -> Void = {}
     var showAcknowledgements: () -> Void = {}
+    var checkForUpdates: () -> Void = {}
     var closeDropdown: () -> Void = {}
     var quit: () -> Void = {}
 }
@@ -24,8 +25,10 @@ extension EnvironmentValues {
 
 enum AppInfo {
     static var version: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0" }
-    /// Shown as "Read the code" in onboarding. Set once the repository has its final name.
-    static let repository: URL? = nil
+    /// Shown as "Read the code" in onboarding.
+    static let repository = URL(string: "https://github.com/ctrlytx4k/murmur")
+    /// Where new versions are published. Opening it in the browser is the whole update check for now.
+    static let releases = URL(string: "https://github.com/ctrlytx4k/murmur/releases")!
 }
 
 /// m:ss since a start date, ticking once a second.

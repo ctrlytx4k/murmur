@@ -372,6 +372,10 @@ struct DropdownView: View {
                 actions.closeDropdown()
                 actions.showAbout()
             }
+            menuRow("Check for Updates…") {
+                actions.closeDropdown()
+                actions.checkForUpdates()
+            }
             menuRow("Quit Murmur", shortcut: "⌘Q") { actions.quit() }
         }
     }

@@ -7,6 +7,7 @@ import SwiftUI
 ///   --snapshots <dir>    render every screen to PNG files and exit
 ///   --selftest <audio>   transcribe a file with both real engines, print the result, and exit
 ///   --matrix <file>      type a test sentence into Notes, Terminal, Safari and Chrome and write what happened
+///   --icon <png>         draw the app icon at 1024 px, for scripts/icon.sh
 ///   --tour               with --demo: open each surface in turn, then quit (a smoke test)
 public final class MurmurApp: NSObject, NSApplicationDelegate {
     private let arguments: [String]
@@ -39,6 +40,10 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         }
         if let index = delegate.arguments.firstIndex(of: "--snapshots"), delegate.arguments.count > index + 1 {
             Snapshots.render(to: URL(fileURLWithPath: delegate.arguments[index + 1]))
+            return
+        }
+        if let index = delegate.arguments.firstIndex(of: "--icon"), delegate.arguments.count > index + 1 {
+            Snapshots.renderIcon(to: URL(fileURLWithPath: delegate.arguments[index + 1]))
             return
         }
         if let index = delegate.arguments.firstIndex(of: "--matrix"), delegate.arguments.count > index + 1 {
@@ -105,6 +110,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             openOnboarding: { [weak self] permission in self?.showOnboarding(at: permission.map(OnboardingStep.step(for:)) ?? .welcome) },
             showAbout: { [weak self] in self?.showAbout() },
             showAcknowledgements: { [weak self] in self?.showAcknowledgements() },
+            checkForUpdates: { [weak self] in self?.checkForUpdates() },
             quit: { NSApp.terminate(nil) })
         statusItem = StatusItemController(stores: stores, actions: actions)
         overlay = OverlayController(stores: stores, actions: actions)
@@ -257,6 +263,11 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// No automatic updates yet: this opens the releases page, in the browser, only when asked.
+    @objc private func checkForUpdates() {
+        NSWorkspace.shared.open(AppInfo.releases)
+    }
+
     private func showAcknowledgements() {
         let bundled = Bundle.main.url(forResource: "THIRD-PARTY-NOTICES", withExtension: "md")
         NSWorkspace.shared.open(bundled ?? URL(string: "https://github.com/FluidInference/FluidAudio")!)
@@ -354,6 +365,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
 
         let app = NSMenu()
         app.addItem(withTitle: "About Murmur", action: #selector(showAbout), keyEquivalent: "").target = self
+        app.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "").target = self
         app.addItem(.separator())
         app.addItem(withTitle: "Settings…", action: #selector(showSettingsFromMenu), keyEquivalent: ",").target = self
         app.addItem(withTitle: "History", action: #selector(showHistory), keyEquivalent: "y").target = self
