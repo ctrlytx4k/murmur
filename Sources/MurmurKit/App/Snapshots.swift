@@ -156,6 +156,7 @@ enum Snapshots {
         settingsShot("settings-hotkeys", st, .hotkeys)
         settingsShot("settings-voice-engine", st, .voiceEngine)
         settingsShot("settings-ai-cleanup", st, .cleanup)
+        settingsShot("settings-meetings", st, .meetings)
         settingsShot("settings-dictionary", st, .dictionary)
         settingsShot("settings-snippets", st, .dictionary, tab: .snippets)
         settingsShot("settings-privacy", st, .privacy)
@@ -170,6 +171,12 @@ enum Snapshots {
             add("meetings-recording", MainWindowMeeting(stores: live, selection: nil))
             add("dropdown-meeting-recording", DropdownView(stores: live, statsToday: statsDay))
             add("meeting-pill-recording", MeetingPillView(stores: live, pill: MeetingPillState()))
+            let hovered = MeetingPillState()
+            hovered.hovering = true
+            add("meeting-pill-hover", MeetingPillView(stores: live, pill: hovered))
+            let call = make(.idle)
+            call.meeting.microphoneUsers(["us.zoom.xos"])
+            add("meeting-pill-call-started", MeetingPillView(stores: call, pill: MeetingPillState()))
             let nudge = MeetingPillState()
             nudge.showsReminder = true
             add("meeting-pill-reminder", MeetingPillView(stores: live, pill: nudge))

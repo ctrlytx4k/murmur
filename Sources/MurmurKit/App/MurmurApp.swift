@@ -25,6 +25,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
     private var statusItem: StatusItemController!
     private var overlay: OverlayController!
     private var meetingPill: MeetingPillController!
+    private var callDetector: CallDetector?
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
     private var permissionPoll: Timer?
@@ -40,6 +41,11 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         let delegate = MurmurApp()
         if let index = delegate.arguments.firstIndex(of: "--selftest"), delegate.arguments.count > index + 1 {
             SelfTest.run(clip: delegate.arguments[index + 1])
+            return
+        }
+        if delegate.arguments.contains("--micusers") {
+            // Which apps have the microphone open right now, as the call detector sees them.
+            print(CallDetector.microphoneUsers().sorted().map { "\($0)\(CallApp.matching($0).map { " -> \($0.name)" } ?? "")" }.joined(separator: "\n"))
             return
         }
         if let index = delegate.arguments.firstIndex(of: "--meetingtest"), delegate.arguments.count > index + 1 {
@@ -156,7 +162,10 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         statusItem = StatusItemController(stores: stores, actions: actions)
         overlay = OverlayController(stores: stores, actions: actions)
         meetingPill = MeetingPillController(stores: stores, actions: actions)
-        if !demo { observeChanges { [weak self] in self?.syncServices() } }
+        if !demo {
+            callDetector = CallDetector { [weak self] users in self?.stores.meeting.microphoneUsers(users) }
+            observeChanges { [weak self] in self?.syncServices() }
+        }
 
         // Permission state is never cached: re-read it while the app runs so the icon stays honest.
         let poll = Timer(timeInterval: 3, repeats: true) { [weak self] _ in
@@ -268,6 +277,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         }
         hotkeys.setRecording(controller.state.isRecording)
         hotkeys.setActionsOpen(stores.overlay.open == .actions)
+        if settings.askWhenCallStarts { callDetector?.start() } else { callDetector?.stop() }
 
         let state = controller.state
         if settings.soundsEnabled, state != lastSoundState {
@@ -354,6 +364,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         case .cycleMode: settings.mode = settings.mode.next
         case .reinsertLast: controller.reinsertLast()
         case .openHistory: showMain(.history)
+        case .toggleMeeting: stores.meeting.toggle()
         case .selectMode(let index):
             guard DictationMode.offered.indices.contains(index) else { return }
             settings.mode = DictationMode.offered[index]
@@ -381,6 +392,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         }
         let policy: NSApplication.ActivationPolicy = settings.showInDock ? .regular : .accessory
         if NSApp.activationPolicy() != policy { NSApp.setActivationPolicy(policy) }
+        mainWindow?.sharingType = settings.hidesMainWindowFromSharing ? .none : .readOnly
     }
 
     // MARK: windows
@@ -404,6 +416,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         mainNavigation.tab = tab
         if mainWindow == nil {
             mainWindow = makeWindow(MainWindowView(stores: stores, navigation: mainNavigation).environment(\.appActions, actions), title: "Murmur")
+            mainWindow?.sharingType = settings.hidesMainWindowFromSharing ? .none : .readOnly
         }
         present(mainWindow)
     }

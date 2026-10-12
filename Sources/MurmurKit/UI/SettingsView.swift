@@ -6,6 +6,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     case overlay = "Overlay"
     case voiceEngine = "Voice Engine"
     case cleanup = "AI Cleanup"
+    case meetings = "Meetings"
     case dictionary = "Dictionary & Snippets"
     case privacy = "Privacy"
     case advanced = "Advanced"
@@ -18,6 +19,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .overlay: "rectangle.bottomthird.inset.filled"
         case .voiceEngine: "waveform"
         case .cleanup: "text.badge.checkmark"
+        case .meetings: "person.2"
         case .dictionary: "character.book.closed"
         case .privacy: "lock"
         case .advanced: "slider.horizontal.3"
@@ -88,6 +90,7 @@ struct SettingsView: View {
                             case .overlay: OverlayPane(stores: stores)
                             case .voiceEngine: VoiceEnginePane(stores: stores)
                             case .cleanup: CleanupPane(stores: stores, providerStatus: cleanupStatus)
+                            case .meetings: MeetingsPane(stores: stores)
                             case .privacy: PrivacyPane(stores: stores)
                             case .advanced: AdvancedPane(stores: stores)
                             case .dictionary: EmptyView()
@@ -281,6 +284,7 @@ private struct HotkeysPane: View {
             ShortcutRow(settings: settings, title: "Cycle mode", subtitle: "Raw → Cleaned up", keyPath: \.cycleModeShortcut, fallback: Shortcut(keyCode: 46, modifiers: .option), first: true)
             ShortcutRow(settings: settings, title: "Re-insert last transcription", subtitle: nil, keyPath: \.reinsertShortcut, fallback: Shortcut(keyCode: 9, modifiers: [.control, .option]))
             ShortcutRow(settings: settings, title: "Open History", subtitle: nil, keyPath: \.historyShortcut, fallback: Shortcut(keyCode: 4, modifiers: [.control, .option]))
+            ShortcutRow(settings: settings, title: "Start or stop a meeting", subtitle: "Starts recording, or stops and transcribes", keyPath: \.meetingShortcut, fallback: HotkeyBindings.defaultMeeting)
             SettingsRow(title: "Cancel dictation", subtitle: "Fixed while recording, so it never collides with app shortcuts") {
                 Keycap(text: "esc").frame(width: 160, height: 32)
                     .background(Tokens.control, in: Pill())

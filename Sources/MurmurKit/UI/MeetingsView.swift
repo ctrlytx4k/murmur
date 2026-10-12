@@ -20,6 +20,7 @@ struct MeetingsView: View {
     @State private var renaming: Int?
     @State private var nameDraft = ""
     @State private var renamingAnchor: UUID?
+    @Environment(\.appActions) private var actions
 
     enum DetailTab: Hashable { case transcript, summary }
 
@@ -210,25 +211,10 @@ struct MeetingsView: View {
                     }
                 }
                 if settings.meetingSource == .microphoneAndCall, let speakers = stores.speakers {
-                    SettingsRow(title: "Tell speakers apart", subtitle: speakersSubtitle(speakers), subtitleColor: speakersFailed(speakers) ? Tokens.warning : Tokens.labelTertiary) {
-                        switch speakers.status {
-                        case .installed:
-                            Toggle("Tell speakers apart", isOn: bind(settings, \.meetingSpeakers)).toggleStyle(MurmurToggleStyle())
-                        case .downloading:
-                            Spinner(size: 12)
-                            Text("Downloading…").font(.mmCallout).foregroundStyle(Tokens.labelSecondary)
-                        case .notInstalled, .failed:
-                            Button("Download · 22 MB") { Task { await speakers.download() } }.buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5))
-                        }
-                    }
-                }
-                SwitchRow(
-                    title: "Remind me to tell people I’m recording", subtitle: "Shows a one-click note you can paste in the chat",
-                    isOn: bind(settings, \.meetingReminder))
-                SettingsRow(title: "After transcribing", subtitle: "The transcript is always kept") {
-                    GlassPopUpButton("After transcribing", selection: bind(settings, \.meetingAudio))
+                    SpeakersRow(speakers: speakers, settings: settings)
                 }
             }
+            Button("Meeting Settings…") { actions.openSettings(.meetings) }.buttonStyle(LinkButtonStyle()).padding(.leading, 4)
             HStack(spacing: 8) {
                 Image(systemName: "person.2").font(.system(size: 12))
                 Text("Tell the people on the call that you are recording. In many places the law requires it.")
@@ -244,19 +230,6 @@ struct MeetingsView: View {
             Button("Discard", role: .destructive) { controller.discard() }
         } message: {
             Text("The audio recorded so far is deleted. Nothing is transcribed.")
-        }
-    }
-
-    private func speakersFailed(_ speakers: FluidSpeakerSeparator) -> Bool {
-        if case .failed = speakers.status { true } else { false }
-    }
-
-    private func speakersSubtitle(_ speakers: FluidSpeakerSeparator) -> String {
-        switch speakers.status {
-        case .installed: "Labels the people on the call “Speaker 1”, “Speaker 2”, and you can name them. Runs on this Mac."
-        case .downloading: "Getting the speaker model. This happens once."
-        case .notInstalled: "Needs a small speaker model, downloaded once. After that it runs on this Mac."
-        case .failed(let reason): reason
         }
     }
 
@@ -278,6 +251,9 @@ struct MeetingsView: View {
                         .buttonStyle(MurmurButtonStyle(kind: .primary, height: 32))
                     Text("Source:").font(.mmCallout).foregroundStyle(Tokens.labelTertiary).padding(.leading, 6)
                     GlassPopUpButton("Source", selection: bind(settings, \.meetingSource))
+                    if !settings.meetingShortcut.keycaps.isEmpty {
+                        Text("or press \(settings.meetingShortcut.keycaps.joined(separator: " "))").font(.mmCallout).foregroundStyle(Tokens.labelTertiary)
+                    }
                 }
             case .recording(let since):
                 HStack(spacing: 10) {
@@ -413,6 +389,7 @@ struct MeetingsView: View {
 
     private func transcript(_ meeting: Meeting) -> some View {
         let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        let marked = meeting.markedLines
         return VStack(alignment: .leading, spacing: 8) {
             Text("Raw transcript · exactly as heard, never edited\(meeting.voiceCount > 0 ? " · speaker names are guesses until you rename them" : meeting.includesCallAudio ? " · “Others” is everyone on the call" : "")")
                 .font(.system(size: 12, weight: .semibold)).foregroundStyle(Tokens.labelSecondary)
@@ -426,6 +403,10 @@ struct MeetingsView: View {
                             }
                             Text(line.text).font(.system(size: 15)).lineSpacing(5).textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                            if marked.contains(line.id) {
+                                Label("Marked", systemImage: "flag.fill").font(.system(size: 10.5, weight: .semibold)).foregroundStyle(Tokens.accentText)
+                                    .padding(.horizontal, 7).frame(height: 20).background(Tokens.accentSoft, in: Pill())
+                            }
                         }
                     }
                     if meeting.lines.isEmpty {
@@ -703,6 +684,8 @@ final class MeetingPillState {
     /// The "let people know" note, for the first seconds of a recording.
     var showsReminder = false
     var copiedReminder = false
+    /// The pointer is resting on the pill: show the controls.
+    var hovering = false
 }
 
 /// The small pill at the top of the screen while a meeting records or transcribes: proof it is running,
@@ -711,14 +694,17 @@ struct MeetingPillView: View {
     let stores: Stores
     let pill: MeetingPillState
     @Environment(\.appActions) private var actions
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var controller: MeetingController { stores.meeting }
 
     var body: some View {
         VStack(spacing: 8) {
             pillBody
-            if controller.state.isRecording, pill.showsReminder { reminder }
+            if controller.state.isRecording, pill.showsReminder, !pill.hovering { reminder }
         }
+        .foregroundStyle(Tokens.label)
+        .id(stores.settings.accent)
     }
 
     /// Shown for the first seconds: a note to paste into the call's chat, so everyone knows.
@@ -742,67 +728,216 @@ struct MeetingPillView: View {
         .foregroundStyle(Tokens.label)
     }
 
-    private var pillBody: some View {
-        Group {
-            switch controller.state {
-            case .recording(let since):
-                HStack(spacing: 9) {
+    /// "Zoom call started": offered once per call, never recorded without a yes (or an earlier "Always").
+    private func callOffer(_ app: CallApp) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            AppBadge(name: app.name, bundleIdentifier: app.bundleIdentifier, size: 26)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(app.isBrowser ? "\(app.name) is using the microphone" : "\(app.name) call started").font(.system(size: 12.5, weight: .semibold))
+                Text("Record and transcribe it on this Mac?").font(.system(size: 11.5)).foregroundStyle(Tokens.labelSecondary)
+            }
+            .fixedSize()
+            Spacer(minLength: 4)
+            if !app.isBrowser {
+                Button("Always for \(app.name)") { controller.recordDetectedCall(always: true) }.buttonStyle(MurmurButtonStyle(height: 26, fontSize: 12))
+            }
+            Button("Not Now") { controller.dismissDetectedCall() }.buttonStyle(MurmurButtonStyle(height: 26, fontSize: 12))
+            Button("Record") { controller.recordDetectedCall() }.buttonStyle(MurmurButtonStyle(kind: .recording, height: 26, fontSize: 12))
+        }
+        .padding(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 10))
+        .frame(width: 540)
+        .glassSurface(cornerRadius: 18)
+        .foregroundStyle(Tokens.label)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func control(_ symbol: String, _ label: String, active: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(active ? Tokens.onAccent : Tokens.labelSecondary)
+                .frame(width: 28, height: 28)
+                .background(active ? Tokens.accent : Tokens.chip, in: Circle())
+                .overlay(Circle().strokeBorder(Tokens.stroke, lineWidth: 0.5))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
+    }
+
+    @ViewBuilder private var pillBody: some View {
+        switch controller.state {
+        case .recording(let since):
+            let expanded = pill.hovering
+            HStack(spacing: 8) {
+                if controller.isPaused {
+                    Image(systemName: "pause.fill").font(.system(size: 9, weight: .bold)).foregroundStyle(Tokens.labelSecondary)
+                    Text("Paused ·").font(.system(size: 12, weight: .medium)).foregroundStyle(Tokens.labelSecondary)
+                } else {
                     PulseDot()
-                    ElapsedTime(since: since).font(.mmMono)
-                    MiniLevel(level: controller.level)
+                }
+                ElapsedTime(since: since).font(.mmMono)
+                if controller.isMuted, !controller.isPaused {
+                    Image(systemName: "mic.slash.fill").font(.system(size: 10, weight: .semibold)).foregroundStyle(Tokens.warning)
+                        .accessibilityLabel("Your microphone is muted")
+                } else {
+                    MiniLevel(level: controller.isPaused ? 0 : controller.level)
+                }
+                if expanded {
+                    Rectangle().fill(Tokens.separator).frame(width: 1, height: 20).padding(.horizontal, 2)
+                    control("flag", controller.markCount > 0 ? "Mark this moment (\(controller.markCount) marked)" : "Mark this moment") { controller.mark() }
+                    control(controller.isMuted ? "mic.slash.fill" : "mic", controller.isMuted ? "Unmute my mic" : "Mute my mic", active: controller.isMuted) { controller.toggleMute() }
+                    control(controller.isPaused ? "play.fill" : "pause.fill", controller.isPaused ? "Resume" : "Pause", active: controller.isPaused) { controller.togglePause() }
                     Button { controller.stop() } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "stop.fill").font(.system(size: 8, weight: .bold))
+                        HStack(spacing: 6) {
+                            RoundedRectangle(cornerRadius: 2).fill(.white).frame(width: 9, height: 9)
                             Text("Stop & Transcribe")
                         }
                     }
-                    .buttonStyle(MurmurButtonStyle(kind: .recording, height: 24, fontSize: 11.5))
-                    .padding(.leading, 2)
+                    .buttonStyle(MurmurButtonStyle(kind: .recording, height: 32, fontSize: 12.5))
+                } else {
+                    Button { controller.stop() } label: {
+                        RoundedRectangle(cornerRadius: 2.5).fill(.white).frame(width: 8, height: 8)
+                            .frame(width: 24, height: 24).background(Tokens.recording, in: Circle()).contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Stop and transcribe")
+                    .help("Stop and transcribe")
+                }
+            }
+            .padding(EdgeInsets(top: 0, leading: expanded ? 16 : 14, bottom: 0, trailing: 6))
+            .frame(height: expanded ? 44 : 36)
+            .glassPill()
+            .animation(reduceMotion ? nil : .snappy(duration: 0.16), value: expanded)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(controller.isPaused ? "Murmur meeting recording, paused" : "Murmur is recording a meeting")
+        case .transcribing(_, let progress):
+            HStack(spacing: 9) {
+                Spinner()
+                Text(controller.isSeparatingSpeakers ? "Telling the speakers apart…" : "Transcribing on this Mac · \(Int(progress * 100))%")
+                    .font(.system(size: 12.5, weight: .medium)).monospacedDigit()
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 36)
+            .glassPill()
+        case .idle:
+            if let app = controller.detectedCall {
+                callOffer(app)
+            } else if let meeting = pill.finished.flatMap({ stores.meetings.meeting($0) }) {
+                HStack(spacing: 9) {
+                    Image(systemName: meeting.isTranscribed ? "checkmark" : "exclamationmark.triangle")
+                        .font(.system(size: 11, weight: .bold)).foregroundStyle(meeting.isTranscribed ? Tokens.success : Tokens.warning)
+                    Text(meeting.isTranscribed ? "\(meeting.title) · \(MeetingsView.length(meeting.duration))" : "Couldn’t transcribe the meeting")
+                        .font(.system(size: 12.5, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                        .frame(maxWidth: 300).fixedSize()
+                    Button("Open") {
+                        pill.finished = nil
+                        actions.openMeetings()
+                    }
+                    .buttonStyle(MurmurButtonStyle(height: 24, fontSize: 11.5))
                 }
                 .padding(EdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 6))
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel("Murmur is recording a meeting")
-            case .transcribing(_, let progress):
-                HStack(spacing: 9) {
-                    Spinner()
-                    Text("Transcribing on this Mac · \(Int(progress * 100))%").font(.system(size: 12.5, weight: .medium)).monospacedDigit()
-                }
-                .padding(.horizontal, 14)
-            case .idle:
-                if let meeting = pill.finished.flatMap({ stores.meetings.meeting($0) }) {
-                    HStack(spacing: 9) {
-                        Image(systemName: meeting.isTranscribed ? "checkmark" : "exclamationmark.triangle")
-                            .font(.system(size: 11, weight: .bold)).foregroundStyle(meeting.isTranscribed ? Tokens.success : Tokens.warning)
-                        Text(meeting.isTranscribed ? "\(meeting.title) · \(MeetingsView.length(meeting.duration))" : "Couldn’t transcribe the meeting")
-                            .font(.system(size: 12.5, weight: .medium)).lineLimit(1).truncationMode(.middle)
-                            .frame(maxWidth: 300).fixedSize()
-                        Button("Open") {
-                            pill.finished = nil
-                            actions.openMeetings()
-                        }
-                        .buttonStyle(MurmurButtonStyle(height: 24, fontSize: 11.5))
-                    }
-                    .padding(EdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 6))
-                }
+                .frame(height: 36)
+                .glassPill()
             }
         }
-        .frame(height: 36)
-        .glassPill()
-        .foregroundStyle(Tokens.label)
-        .id(stores.settings.accent)
     }
 
-    /// Three bars that move with the microphone, so a dead microphone is obvious.
+    /// Seven bars that move with the microphone, so a dead microphone is obvious.
     private struct MiniLevel: View {
         let level: Float
+        private static let shape: [CGFloat] = [8, 14, 10, 16, 7, 12, 15]
         var body: some View {
             HStack(alignment: .center, spacing: 2) {
-                ForEach(0..<3, id: \.self) { bar in
-                    let lit = Double(level) > [0.04, 0.2, 0.45][bar]
-                    Pill().fill(lit ? Tokens.label : Tokens.controlStrong).frame(width: 2.5, height: CGFloat(6 + bar * 3))
+                ForEach(0..<7, id: \.self) { bar in
+                    Pill().fill(Tokens.label.opacity(level > 0.03 ? 0.9 : 0.3))
+                        .frame(width: 2, height: max(2, Self.shape[bar] * CGFloat(min(1, 0.25 + Double(level) * 1.6))))
                 }
             }
+            .frame(height: 16)
             .accessibilityHidden(true)
+        }
+    }
+}
+
+/// The speaker model: download it once, then switch telling speakers apart on or off.
+struct SpeakersRow: View {
+    let speakers: FluidSpeakerSeparator
+    let settings: SettingsStore
+    var first = false
+
+    private var failed: Bool { if case .failed = speakers.status { true } else { false } }
+    private var subtitle: String {
+        switch speakers.status {
+        case .installed: "Labels the people on the call “Speaker 1”, “Speaker 2”, and you can name them. Runs on this Mac."
+        case .downloading: "Getting the speaker model. This happens once."
+        case .notInstalled: "Needs a small speaker model, downloaded once. After that it runs on this Mac."
+        case .failed(let reason): reason
+        }
+    }
+
+    var body: some View {
+        SettingsRow(title: "Tell speakers apart", subtitle: subtitle, subtitleColor: failed ? Tokens.warning : Tokens.labelTertiary, showsDivider: !first) {
+            switch speakers.status {
+            case .installed:
+                Toggle("Tell speakers apart", isOn: bind(settings, \.meetingSpeakers)).toggleStyle(MurmurToggleStyle())
+            case .downloading:
+                Spinner(size: 12)
+                Text("Downloading…").font(.mmCallout).foregroundStyle(Tokens.labelSecondary)
+            case .notInstalled, .failed:
+                Button("Download · 22 MB") { Task { await speakers.download() } }.buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5))
+            }
+        }
+    }
+}
+
+/// Settings › Meetings.
+struct MeetingsPane: View {
+    let stores: Stores
+    private var settings: SettingsStore { stores.settings }
+
+    var body: some View {
+        SettingsGroup(title: "Recording") {
+            SettingsRow(title: "Source", subtitle: "Call audio needs System Audio Recording. It is audio only, never your screen.", showsDivider: false) {
+                GlassPopUpButton("Source", selection: bind(settings, \.meetingSource))
+            }
+            if let speakers = stores.speakers { SpeakersRow(speakers: speakers, settings: settings) }
+            SettingsRow(title: "After transcribing", subtitle: "The transcript is always kept") {
+                GlassPopUpButton("After transcribing", selection: bind(settings, \.meetingAudio))
+            }
+        }
+
+        SettingsGroup(title: "When a call starts") {
+            SwitchRow(
+                title: "Ask when a call starts", subtitle: "Zoom, Teams, Slack huddles, Discord, Webex, and a browser that starts using the microphone",
+                first: true, isOn: bind(settings, \.askWhenCallStarts))
+            ForEach(settings.alwaysRecordApps, id: \.self) { app in
+                SettingsRow(title: CallApp.name(for: app), subtitle: "Recorded without asking") {
+                    Button("Ask Again") { settings.alwaysRecordApps.removeAll { $0 == app } }.buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5))
+                }
+            }
+            SwitchRow(
+                title: "Remind me to tell people I’m recording", subtitle: "Shows a one-click note you can paste in the chat",
+                isOn: bind(settings, \.meetingReminder))
+        }
+
+        SettingsGroup(title: "Screen sharing") {
+            SettingsRow(title: "Recording pill", subtitle: "Always left out of screen shares, recordings and screenshots", showsDivider: false) {
+                StatusChip(text: "Hidden", symbol: "eye.slash", color: Tokens.success, background: Tokens.successSoft)
+            }
+            SwitchRow(
+                title: "Hide Murmur’s main window too", subtitle: "Overview, History and Meetings stay off a shared screen",
+                isOn: bind(settings, \.hidesMainWindowFromSharing))
+        }
+
+        SettingsGroup(title: "Where it is kept") {
+            SettingsRow(title: "Meetings folder", subtitle: "Transcripts, summaries and any kept audio. On this Mac only.", showsDivider: false) {
+                Button("Show in Finder") {
+                    try? FileManager.default.createDirectory(at: stores.meetings.directory, withIntermediateDirectories: true)
+                    NSWorkspace.shared.open(stores.meetings.directory)
+                }
+                .buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5))
+            }
         }
     }
 }

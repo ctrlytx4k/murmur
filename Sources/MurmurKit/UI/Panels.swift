@@ -213,6 +213,9 @@ final class MeetingPillController {
     private var placed = false
     private var hide: Task<Void, Never>?
     private var reminder: Task<Void, Never>?
+    private var offer: Task<Void, Never>?
+    private var offered: CallApp?
+    private var hover: Timer?
     private let settings: SettingsStore
 
     init(stores: Stores, actions: AppActions) {
@@ -227,7 +230,7 @@ final class MeetingPillController {
         observeChanges { [weak self] in self?.update() }
     }
 
-    private static let canvas = CGSize(width: 460, height: 130 + 2 * FloatingPanel.margin)
+    private static let canvas = CGSize(width: 600, height: 140 + 2 * FloatingPanel.margin)
 
     private func update() {
         let busy = !controller.state.isIdle
@@ -259,7 +262,45 @@ final class MeetingPillController {
             }
         }
         wasBusy = busy
-        if busy || pill.finished != nil { panel.fadeIn() } else { panel.fadeOut() }
+        // "A call started": the offer stays for half a minute, then counts as Not Now.
+        let call = controller.detectedCall
+        if call != offered {
+            offered = call
+            offer?.cancel()
+            if call != nil {
+                offer = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(30))
+                    if !Task.isCancelled { self?.controller.dismissDetectedCall() }
+                }
+            }
+        }
+        let visible = busy || pill.finished != nil || call != nil
+        if visible { panel.fadeIn() } else { panel.fadeOut() }
+        watchHover(visible && recording)
+    }
+
+    /// The pill never takes focus, so the pointer is watched directly: resting it on the pill shows the controls.
+    private func watchHover(_ watching: Bool) {
+        if !watching {
+            hover?.invalidate()
+            hover = nil
+            if pill.hovering { pill.hovering = false }
+            return
+        }
+        guard hover == nil else { return }
+        let timer = Timer(timeInterval: 0.12, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let frame = self.panel.frame, mouse = NSEvent.mouseLocation
+                // The pill sits at the top center of its canvas. A little slack keeps it open while moving between buttons.
+                let width: CGFloat = self.pill.hovering ? 440 : 230
+                let zone = NSRect(x: frame.midX - width / 2, y: frame.maxY - FloatingPanel.margin - 54, width: width, height: 64)
+                let inside = zone.contains(mouse)
+                if inside != self.pill.hovering { self.pill.hovering = inside }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        hover = timer
     }
 
     /// Top center, just under the menu bar. Only the first time: after that it stays where it was dragged.
@@ -276,13 +317,16 @@ final class StatusItemController: NSObject {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let panel = FloatingPanel(level: .popUpMenu, allowsKey: true)
     private let controller: DictationController
+    private let meeting: MeetingController
     private var animation: Timer?
     private var animationStart = Date()
     private var shown: MenuBarState?
+    private var shownMeeting = false
     private var outsideClicks: Any?
 
     init(stores: Stores, actions: AppActions) {
         self.controller = stores.controller
+        self.meeting = stores.meeting
         super.init()
         var actions = actions
         actions.closeDropdown = { [weak self] in self?.close(immediately: true) }
@@ -308,7 +352,8 @@ final class StatusItemController: NSObject {
         case .recording: .recording
         case .processing: .processing
         case .error: .needsAttention
-        case .idle, .inserted: controller.permissions.allGranted ? .idle : .permissionMissing
+        // A meeting being recorded shows the recording icon too, so the menu bar never looks idle while Murmur listens.
+        case .idle, .inserted: !controller.permissions.allGranted ? .permissionMissing : (meeting.state.isRecording ? .recording : .idle)
         }
     }
 
@@ -322,8 +367,9 @@ final class StatusItemController: NSObject {
         animation = nil
         animationStart = Date()
         drawFrame()
-        item.button?.toolTip = state.accessibilityLabel
-        item.button?.setAccessibilityLabel(state.accessibilityLabel)
+        let label = state == .recording && !controller.state.isRecording ? "Murmur, recording a meeting" : state.accessibilityLabel
+        item.button?.toolTip = label
+        item.button?.setAccessibilityLabel(label)
 
         let animated = (state == .recording || state == .processing) && !FloatingPanel.reduceMotion
         if animated || state == .recording {
