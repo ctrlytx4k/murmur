@@ -17,15 +17,18 @@ private nonisolated final class TrackWriter: @unchecked Sendable {
     private var unreadable = 0
     private var sourceFormat = ""
     private var held = false
-    private let started = ProcessInfo.processInfo.systemUptime
+    private let started: TimeInterval
     private let report: (@Sendable (Float) -> Void)?
 
-    init(url: URL, report: (@Sendable (Float) -> Void)? = nil) throws {
+    /// `started` is the moment the recording began, as system uptime. The tracks of one meeting share it,
+    /// so a time in one is the same moment in the other however long each took to get going.
+    init(url: URL, started: TimeInterval = ProcessInfo.processInfo.systemUptime, report: (@Sendable (Float) -> Void)? = nil) throws {
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: Self.sampleRate, AVNumberOfChannelsKey: 1,
             AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false,
         ]
         file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+        self.started = started
         self.report = report
     }
 
@@ -132,6 +135,30 @@ private nonisolated final class TrackWriter: @unchecked Sendable {
     }
 }
 
+/// What the capture device hands over on each cycle.
+nonisolated enum TapInput {
+    /// The tap's audio as a buffer. When the output device has inputs of its own (a headset, AirPods on a call),
+    /// the capture device lists those streams first and the tap's last, so the tap is read from the end of the list.
+    static func buffer(from input: UnsafePointer<AudioBufferList>, format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
+        let wanted = format.isInterleaved ? 1 : Int(format.channelCount)
+        if list.count == wanted { return AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: input, deallocator: nil) }
+        let bytesPerFrame = Int(format.streamDescription.pointee.mBytesPerFrame)
+        guard list.count > wanted, bytesPerFrame > 0 else { return nil }
+        let own = list[(list.count - wanted)...]
+        let bytes = own.map { Int($0.mDataByteSize) }.min() ?? 0
+        let frames = bytes / bytesPerFrame
+        guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)) else { return nil }
+        buffer.frameLength = AVAudioFrameCount(frames)
+        let target = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+        for (index, source) in own.enumerated() {
+            guard index < target.count, let from = source.mData, let to = target[index].mData else { return nil }
+            memcpy(to, from, frames * bytesPerFrame)
+        }
+        return buffer
+    }
+}
+
 public nonisolated struct SystemAudioFailure: LocalizedError {
     let step: String
     let status: OSStatus
@@ -219,7 +246,7 @@ private final class SystemAudioTap {
         procID = proc
         status = AudioDeviceStart(aggregate, proc)
         guard status == noErr else { throw SystemAudioFailure(step: "starting the capture device", status: status) }
-        DebugLog.log("meeting: call capture started, tap format \(Int(format.sampleRate)) Hz, \(format.channelCount) ch\(format.isInterleaved ? ", interleaved" : "")")
+        DebugLog.log("meeting: call capture started, tap format \(Int(format.sampleRate)) Hz, \(format.channelCount) ch\(format.isInterleaved ? ", interleaved" : ""), capture device input \(Self.inputLayout(of: aggregate))")
     }
 
     private func detach() {
@@ -250,9 +277,21 @@ private final class SystemAudioTap {
     private nonisolated static func ioBlock(writer: TrackWriter?, format: AVAudioFormat) -> AudioDeviceIOBlock {
         { _, input, _, _, _ in
             guard let writer else { return }
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: input, deallocator: nil) else { return writer.noteUnreadable() }
+            guard let buffer = TapInput.buffer(from: input, format: format) else { return writer.noteUnreadable() }
             writer.write(buffer)
         }
+    }
+
+    /// The channels of each input stream of a device, such as "2" or "1+2". For the debug log.
+    private static func inputLayout(of device: AudioObjectID) -> String {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreamConfiguration, mScope: kAudioObjectPropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size) == noErr, size >= UInt32(MemoryLayout<AudioBufferList>.size) else { return "unknown" }
+        let memory = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment)
+        defer { memory.deallocate() }
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, memory) == noErr else { return "unknown" }
+        let list = UnsafeMutableAudioBufferListPointer(memory.assumingMemoryBound(to: AudioBufferList.self))
+        return list.isEmpty ? "none" : list.map { String($0.mNumberChannels) }.joined(separator: "+") + " ch"
     }
 
     private static func defaultOutputUID() -> String? {
@@ -289,6 +328,7 @@ public final class LiveMeetingAudio: MeetingAudioService {
     private var onLevel: ((Float) -> Void)?
     private var paused = false
     private var muted = false
+    private var callWanted = false
 
     public init() {}
 
@@ -311,8 +351,11 @@ public final class LiveMeetingAudio: MeetingAudioService {
         _ = stop()
         paused = false
         muted = false
+        callWanted = false
         self.onLevel = onLevel
-        let writer = try TrackWriter(url: url) { [weak self] level in
+        // One clock for both tracks: the microphone can take a second to start (Bluetooth), the call starts after it.
+        let began = ProcessInfo.processInfo.systemUptime
+        let writer = try TrackWriter(url: url, started: began) { [weak self] level in
             Task { @MainActor in self?.onLevel?(level) }
         }
         microphone = writer
@@ -336,8 +379,9 @@ public final class LiveMeetingAudio: MeetingAudioService {
         }
         if let callURL {
             // The meeting still records without the call: the transcript then says the call was not heard.
+            callWanted = true
             do {
-                let callWriter = try TrackWriter(url: callURL)
+                let callWriter = try TrackWriter(url: callURL, started: began)
                 try tap.start(writer: callWriter)
                 call = callWriter
             } catch {
@@ -361,7 +405,10 @@ public final class LiveMeetingAudio: MeetingAudioService {
         if let callEnd { DebugLog.log("meeting: call track, \(callEnd.summary)") }
         microphone = nil
         call = nil
-        return MeetingRecording(duration: max(microphoneEnd?.duration ?? 0, callEnd?.duration ?? 0), callWasSilent: callEnd.map { $0.peak == 0 } ?? false)
+        // A call track that could not be started counts as silent, so the meeting says the call was not heard.
+        let callWasSilent = callEnd.map { $0.peak == 0 } ?? callWanted
+        callWanted = false
+        return MeetingRecording(duration: max(microphoneEnd?.duration ?? 0, callEnd?.duration ?? 0), callWasSilent: callWasSilent)
     }
 
     public func requestSystemAudio() {
@@ -379,10 +426,11 @@ public final class LiveMeetingAudio: MeetingAudioService {
         }
     }
 
-    /// Runs an audio file through the same writer a live recording uses. For `--meetingtest` only.
-    nonisolated static func rewrite(_ source: URL, to target: URL) throws {
+    /// Runs an audio file through the same writer a live recording uses. For `--meetingtest` and tests.
+    /// `started` is when the recording is taken to have begun, as system uptime: time that has passed since is written as silence first.
+    nonisolated static func rewrite(_ source: URL, to target: URL, started: TimeInterval = ProcessInfo.processInfo.systemUptime) throws {
         let file = try AVAudioFile(forReading: source)
-        let writer = try TrackWriter(url: target)
+        let writer = try TrackWriter(url: target, started: started)
         guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 4096) else { return }
         while file.framePosition < file.length {
             try file.read(into: buffer, frameCount: 4096)
