@@ -18,6 +18,7 @@
   <dict>
     <key>NSAllowsLocalNetworking</key><true/>
   </dict>
-  <key>NSMicrophoneUsageDescription</key><string>Murmur listens only while you hold or toggle your dictation shortcut. Audio is transcribed on this Mac.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Murmur listens only while you dictate or record a meeting. Audio is transcribed on this Mac.</string>
+  <key>NSAudioCaptureUsageDescription</key><string>Murmur records a call’s audio only while you record a meeting, so the transcript includes the other people. Audio only, never your screen, and it stays on this Mac.</string>
 </dict>
 </plist>

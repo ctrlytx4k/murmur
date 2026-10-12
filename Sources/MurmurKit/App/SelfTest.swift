@@ -54,6 +54,38 @@ enum SelfTest {
         RunLoop.main.run()
     }
 
+    /// Runs audio files through the meeting pipeline with the real engine: the recorder's file writer, the
+    /// track reader, the speech splitter and the transcriber. Everything except the live capture itself.
+    static func runMeeting(microphone: String, call: String?) {
+        Task {
+            do {
+                let folder = FileManager.default.temporaryDirectory.appendingPathComponent("murmur-meetingtest-\(UUID().uuidString)")
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                defer { try? FileManager.default.removeItem(at: folder) }
+                let microphoneURL = folder.appendingPathComponent("microphone.caf"), callURL = folder.appendingPathComponent("call.caf")
+                try LiveMeetingAudio.rewrite(URL(fileURLWithPath: microphone), to: microphoneURL)
+                if let call { try LiveMeetingAudio.rewrite(URL(fileURLWithPath: call), to: callURL) }
+                let size = (try? FileManager.default.attributesOfItem(atPath: microphoneURL.path)[.size] as? Int) ?? 0
+                let levels = try await AudioFileTrack(url: microphoneURL).levels()
+                print("microphone track: \(size / 1024) KB, \(String(format: "%.1f", Double(levels.count) * SpeechSegmenter.frame)) s, \(SpeechSegmenter.segments(levels: levels).count) stretches of speech")
+                let settings = SettingsStore(defaults: UserDefaults(suiteName: "murmur-selftest")!)
+                let router = EngineRouter(settings: settings)
+                let start = Date()
+                let result = try await MeetingTranscriber.transcribe(
+                    microphone: AudioFileTrack(url: microphoneURL), call: call == nil ? nil : AudioFileTrack(url: callURL), engine: router.apple, onProgress: { _ in })
+                print("transcribed in \(String(format: "%.1f", Date().timeIntervalSince(start))) s, \(result.lines.count) lines\(result.note.map { ", note: \($0)" } ?? "")")
+                for line in result.lines {
+                    print("  \(String(format: "%5.1f", line.start)) \(line.speaker?.label ?? "-"): \(line.text)")
+                }
+                exit(0)
+            } catch {
+                print("meetingtest failed: \(error)")
+                exit(1)
+            }
+        }
+        RunLoop.main.run()
+    }
+
     private static func load(_ path: String) throws -> AudioClip {
         let file = try AVAudioFile(forReading: URL(fileURLWithPath: path))
         guard let source = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)) else { throw EngineNotReady() }

@@ -167,7 +167,7 @@ public final class LiveAudioCapture: AudioCaptureService {
         return samples
     }
 
-    private static func coreAudioDevice(forUID uid: String) -> AudioDeviceID? {
+    static func coreAudioDevice(forUID uid: String) -> AudioDeviceID? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyTranslateUIDToDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var device = AudioDeviceID(0)
