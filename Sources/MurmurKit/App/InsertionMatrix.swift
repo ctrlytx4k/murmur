@@ -177,6 +177,8 @@ enum InsertionMatrix {
             row = fail(row, "Insertion reported a failure")
             return nil
         }
+        // The clipboard is put back a little after the paste, so the target has time to read it.
+        await insertion.restoreTask?.value
         row.clipboard = pasteboard.string(forType: .string) == clipboardMarker ? "yes" : "NO"
         return receipt
     }

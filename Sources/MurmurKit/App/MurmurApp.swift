@@ -26,6 +26,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
     private var onboardingWindow: NSWindow?
     private var permissionPoll: Timer?
     private var isPreparingLanguage = false
+    private var insertion: PasteInsertion?
 
     public init(arguments: [String] = CommandLine.arguments) {
         self.arguments = arguments
@@ -74,8 +75,10 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         } else {
             let router = EngineRouter(settings: settings)
             let audio = LiveAudioCapture()
+            let insertion = PasteInsertion(settings: settings)
+            self.insertion = insertion
             controller = DictationController(
-                audio: audio, engine: router, insertion: PasteInsertion(settings: settings), permissions: LivePermissionsService(),
+                audio: audio, engine: router, insertion: insertion, permissions: LivePermissionsService(),
                 settings: settings, cleanup: AppleCleanup(), history: history, dictionary: dictionary)
             audio.onDeviceChange = { [weak self] message in self?.controller.noteDeviceChange(message) }
             catalog = ModelCatalog(parakeetStatus: router.parakeet.isInstalled ? .installed : .available)
@@ -177,6 +180,11 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         await pause(2)
         print("tour finished in state \(controller.state)")
         NSApp.terminate(nil)
+    }
+
+    public func applicationWillTerminate(_ notification: Notification) {
+        // A take from the last couple of seconds may still have its text on the clipboard.
+        insertion?.flushRestore()
     }
 
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
