@@ -329,6 +329,24 @@ private final class FakeMeetingAudio: MeetingAudioService {
         #expect(result.note == nil)
     }
 
+    @Test func anEchoThatRunsStraightIntoYourReplyIsKeptWhole() async throws {
+        final class Scripted: TranscriptionEngine {
+            let displayName = "scripted"
+            func transcribe(_ clip: AudioClip) async throws -> String {
+                // The microphone's stretch starts at 2 s (the speakers) and carries on into your answer.
+                Int((clip.samples.first ?? 0).rounded()) == 2
+                    ? "the engine step feels heavy for new users on a slow connection yeah I agree"
+                    : "the engine step feels heavy for new users on a slow connection"
+            }
+        }
+        // The call speaks from 1.9 s to 6 s. The microphone hears it and, with no pause, you answering until 8 s.
+        let result = try await MeetingTranscriber.transcribe(
+            microphone: MeetingFakeTrack.of([(2, false), (6, true), (2, false)]),
+            call: MeetingFakeTrack.of([(1.9, false), (4.1, true), (4, false)]), engine: Scripted(), onProgress: { _ in })
+        #expect(result.lines.map(\.speaker) == [.others, .you])
+        #expect(result.lines.last?.text.hasSuffix("yeah I agree") == true && result.note == nil)
+    }
+
     // MARK: speakers
 
     @Test func turnsAreJoinedTidiedAndNumberedInOrderOfFirstSpeaking() {

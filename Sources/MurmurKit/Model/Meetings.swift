@@ -329,6 +329,9 @@ public nonisolated struct CallApp: Equatable, Sendable {
 /// Words the microphone picked up from the Mac's own speakers. With headphones there are none; without them
 /// the other people's words would otherwise appear twice, once under "You".
 public nonisolated enum EchoFilter {
+    /// Seconds of a microphone line that may fall outside what the call was saying and still be only the speakers.
+    static let longestAlone = 0.6
+
     static func words(_ text: String) -> [String] {
         text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
     }
@@ -493,7 +496,11 @@ public enum MeetingTranscriber {
             let nearby = heard.filter { $0.line.speaker == .others && $0.range.lowerBound <= entry.range.upperBound + 1.5 && $0.range.upperBound >= entry.range.lowerBound - 1.5 }
             // The call's ranges are widened a little: the two tracks are cut into turns separately, and sound takes a moment to cross the room.
             let speaking = nearby.map { $0.range.lowerBound - 0.5...$0.range.upperBound + 0.5 }
-            guard !nearby.isEmpty, EchoFilter.overlap(of: entry.range, with: speaking) >= 0.5, EchoFilter.isEcho(microphone: entry.line.text, call: nearby.map { EchoFilter.said($0.line.text, over: $0.range, during: entry.range.lowerBound - 2...entry.range.upperBound + 2) }.joined(separator: " ")) else { return entry.line }
+            // A stretch that runs on after the call has stopped has your own words in it (a reply straight after
+            // the other person, with no pause): it is kept whole, echo and all, rather than lose them.
+            let covered = EchoFilter.overlap(of: entry.range, with: speaking)
+            let alone = (1 - covered) * (entry.range.upperBound - entry.range.lowerBound)
+            guard !nearby.isEmpty, covered >= 0.5, alone <= EchoFilter.longestAlone, EchoFilter.isEcho(microphone: entry.line.text, call: nearby.map { EchoFilter.said($0.line.text, over: $0.range, during: entry.range.lowerBound - 2...entry.range.upperBound + 2) }.joined(separator: " ")) else { return entry.line }
             echoes += 1
             return nil
         }
