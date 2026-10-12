@@ -1,9 +1,9 @@
 import SwiftUI
 
 enum OnboardingStep: Int, CaseIterable {
-    case welcome, microphone, accessibility, inputMonitoring, model, tryIt
+    case welcome, microphone, accessibility, model, tryIt
 
-    /// The steps that count toward "Step 2 of 5". Try it is the finish line, not a step.
+    /// The steps that count toward "Step 2 of 4". Try it is the finish line, not a step.
     static let numbered = allCases.filter { $0 != .tryIt }
     var number: Int { min(rawValue + 1, Self.numbered.count) }
 
@@ -11,7 +11,6 @@ enum OnboardingStep: Int, CaseIterable {
         switch self {
         case .microphone: .microphone
         case .accessibility: .accessibility
-        case .inputMonitoring: .inputMonitoring
         default: nil
         }
     }
@@ -20,12 +19,11 @@ enum OnboardingStep: Int, CaseIterable {
         switch permission {
         case .microphone: .microphone
         case .accessibility: .accessibility
-        case .inputMonitoring: .inputMonitoring
         }
     }
 }
 
-/// First launch: the privacy promise, three permissions checked live, the speech model, then a practice field. 620 x 540.
+/// First launch: the privacy promise, two permissions checked live, the speech model, then a practice field. 620 x 540.
 struct OnboardingView: View {
     let stores: Stores
     private var controller: DictationController { stores.controller }
@@ -139,14 +137,9 @@ struct OnboardingView: View {
                  okTitle: "Microphone access granted", okSub: "Say something; the meter should move.", path: "Microphone")
         case .accessibility:
             Copy(symbol: "accessibility", step: stepLabel("Accessibility"), title: "Let Murmur type for you",
-                 why: "Accessibility lets Murmur place text at your cursor in any app, the same way a keyboard would.",
-                 never: "Never: reading other windows, clicking for you, or typing into password fields.",
-                 okTitle: "Accessibility granted", okSub: "Murmur can type into the app you’re using.", path: "Accessibility")
-        case .inputMonitoring:
-            Copy(symbol: "keyboard", step: stepLabel("Input Monitoring"), title: "Let your shortcut work everywhere",
-                 why: "Input Monitoring lets Murmur notice your dictation shortcut even when another app is in front.",
-                 never: "Never: logging keystrokes. Murmur only watches for the one shortcut you set.",
-                 okTitle: "Input Monitoring granted", okSub: "Your shortcut is \(settings.shortcut.spokenName). Change it any time in Settings.", path: "Input Monitoring")
+                 why: "Accessibility lets Murmur notice your dictation shortcut in any app and place text at your cursor, the same way a keyboard would.",
+                 never: "Never: logging keystrokes, reading other windows, clicking for you, or typing into password fields.",
+                 okTitle: "Accessibility granted", okSub: "Your shortcut is \(settings.shortcut.spokenName). Change it any time in Settings.", path: "Accessibility")
         }
     }
 
@@ -197,10 +190,6 @@ struct OnboardingView: View {
                         Text("turn on ") + Text("Murmur").fontWeight(.semibold).foregroundStyle(Tokens.labelSecondary)
                     }
                     .font(.mmSub).foregroundStyle(Tokens.labelTertiary)
-                    if permission == .inputMonitoring {
-                        Text("macOS may quit and reopen Murmur when you switch this on. That’s expected, and setup picks up right here.")
-                            .font(.mmSub).foregroundStyle(Tokens.labelSecondary).fixedSize(horizontal: false, vertical: true)
-                    }
                     if permission != .microphone {
                         // macOS ties these grants to the exact build. After a rebuild the switch still looks on but no longer counts.
                         Text("Already switched on? Select Murmur in that list, remove it with −, then add it again with +.")

@@ -17,8 +17,8 @@ enum Snapshots {
         let last = Transcription(
             text: "Sounds good. I’ll send the revised draft Thursday morning and loop in the design team before the review.",
             date: Date().addingTimeInterval(-120), appName: "Notes", mode: .cleaned)
-        let noMic = PermissionSnapshot(microphone: false, accessibility: true, inputMonitoring: true)
-        let noAX = PermissionSnapshot(microphone: true, accessibility: false, inputMonitoring: true)
+        let noMic = PermissionSnapshot(microphone: false, accessibility: true)
+        let noAX = PermissionSnapshot(microphone: true, accessibility: false)
 
         func make(_ state: DictationState, permissions: PermissionSnapshot = .allGranted, silent: Bool = false, last: Transcription? = nil, toggle: Bool = false, notice: String? = nil, empty: Bool = false) -> Stores {
             let defaults = UserDefaults(suiteName: "murmur-snapshots-\(UUID().uuidString)")!
@@ -174,17 +174,14 @@ enum Snapshots {
 
         add("onboarding-1-welcome", OnboardingView(stores: st, step: .welcome))
         add("onboarding-2-microphone-granted", OnboardingView(stores: st, step: .microphone))
-        add("onboarding-4-input-monitoring-granted", OnboardingView(stores: st, step: .inputMonitoring))
-        add("onboarding-5-speech-model", OnboardingView(stores: st, step: .model))
-        add("onboarding-6-try-it", OnboardingView(stores: st, step: .tryIt))
+        add("onboarding-4-speech-model", OnboardingView(stores: st, step: .model))
+        add("onboarding-5-try-it", OnboardingView(stores: st, step: .tryIt))
         st = make(.idle, permissions: noAX)
         add("onboarding-3-accessibility-waiting", OnboardingView(stores: st, step: .accessibility))
-        st = make(.idle, permissions: PermissionSnapshot(microphone: true, accessibility: true, inputMonitoring: false))
-        add("onboarding-4-input-monitoring-waiting", OnboardingView(stores: st, step: .inputMonitoring))
         st = make(.idle)
         st.catalog.setStatus(.downloading(0.62), for: "parakeet-v3")
         st.catalog.languageStatus = .preparing
-        add("onboarding-5-speech-model-preparing", OnboardingView(stores: st, step: .model))
+        add("onboarding-4-speech-model-preparing", OnboardingView(stores: st, step: .model))
 
         for (name, view) in shots {
             for (suffix, appearance, backdrop) in [

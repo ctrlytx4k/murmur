@@ -2,14 +2,16 @@ import AVFoundation
 import AppKit
 import ApplicationServices
 
+/// What Murmur needs from macOS. Accessibility covers both typing the text and noticing the shortcut:
+/// the hotkey listener is an active event tap, which macOS allows on Accessibility alone. Input Monitoring
+/// is not needed and is never asked for.
 public nonisolated enum Permission: String, CaseIterable, Sendable {
-    case microphone, accessibility, inputMonitoring
+    case microphone, accessibility
 
     public var name: String {
         switch self {
         case .microphone: "Microphone"
         case .accessibility: "Accessibility"
-        case .inputMonitoring: "Input Monitoring"
         }
     }
 
@@ -18,7 +20,6 @@ public nonisolated enum Permission: String, CaseIterable, Sendable {
         let anchor = switch self {
         case .microphone: "Privacy_Microphone"
         case .accessibility: "Privacy_Accessibility"
-        case .inputMonitoring: "Privacy_ListenEvent"
         }
         return URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)")!
     }
@@ -27,21 +28,18 @@ public nonisolated enum Permission: String, CaseIterable, Sendable {
 public nonisolated struct PermissionSnapshot: Equatable, Sendable {
     public var microphone: Bool
     public var accessibility: Bool
-    public var inputMonitoring: Bool
 
-    public init(microphone: Bool, accessibility: Bool, inputMonitoring: Bool) {
+    public init(microphone: Bool, accessibility: Bool) {
         self.microphone = microphone
         self.accessibility = accessibility
-        self.inputMonitoring = inputMonitoring
     }
 
-    public static let allGranted = PermissionSnapshot(microphone: true, accessibility: true, inputMonitoring: true)
+    public static let allGranted = PermissionSnapshot(microphone: true, accessibility: true)
 
     public func isGranted(_ permission: Permission) -> Bool {
         switch permission {
         case .microphone: microphone
         case .accessibility: accessibility
-        case .inputMonitoring: inputMonitoring
         }
     }
 
@@ -62,8 +60,7 @@ public final class LivePermissionsService: PermissionsService {
     public func snapshot() -> PermissionSnapshot {
         PermissionSnapshot(
             microphone: AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
-            accessibility: AXIsProcessTrusted(),
-            inputMonitoring: CGPreflightListenEventAccess())
+            accessibility: AXIsProcessTrusted())
     }
 
     public func request(_ permission: Permission) {
@@ -78,9 +75,6 @@ public final class LivePermissionsService: PermissionsService {
             // The system prompt only appears the first time; opening the pane always works.
             let prompt = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
             _ = AXIsProcessTrustedWithOptions(prompt)
-            NSWorkspace.shared.open(permission.settingsURL)
-        case .inputMonitoring:
-            _ = CGRequestListenEventAccess()
             NSWorkspace.shared.open(permission.settingsURL)
         }
     }

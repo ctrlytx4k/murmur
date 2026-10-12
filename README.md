@@ -32,15 +32,14 @@ Hold a shortcut, speak, and the text appears in whatever app you are using. Ther
 
 Download the latest disk image from the [releases page](https://github.com/ctrlytx4k/murmur/releases), open it, and drag Murmur to Applications.
 
-On first launch Murmur walks you through three permissions:
+On first launch Murmur walks you through two permissions:
 
 | Permission | Why |
 |---|---|
 | Microphone | To hear you, only while you are dictating |
 | Accessibility | To notice your shortcut and type the text at your cursor |
-| Input Monitoring | To notice your shortcut while another app is in front |
 
-macOS may quit and reopen Murmur when you grant Input Monitoring. That is expected; setup carries on where it left off.
+Murmur does not ask for Input Monitoring.
 
 ## Build from source
 

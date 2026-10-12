@@ -56,7 +56,6 @@ final class DemoPermissions: PermissionsService {
         switch permission {
         case .microphone: current.microphone = true
         case .accessibility: current.accessibility = true
-        case .inputMonitoring: current.inputMonitoring = true
         }
     }
 }

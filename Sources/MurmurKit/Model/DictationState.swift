@@ -31,7 +31,6 @@ public nonisolated struct Transcription: Equatable, Sendable {
 public nonisolated enum DictationError: Equatable, Sendable {
     case microphoneDenied
     case accessibilityDenied
-    case inputMonitoringDenied
     case secureInput
     case nothingHeard
     case noInputDevice
@@ -45,7 +44,6 @@ public nonisolated enum DictationError: Equatable, Sendable {
         switch self {
         case .microphoneDenied: "Microphone access is off"
         case .accessibilityDenied: "Accessibility access is off"
-        case .inputMonitoringDenied: "Input Monitoring is off"
         case .secureInput: "Password field: nothing was typed"
         case .nothingHeard: "Didn’t catch anything"
         case .noInputDevice: "No microphone found"
@@ -59,8 +57,7 @@ public nonisolated enum DictationError: Equatable, Sendable {
     public var message: String {
         switch self {
         case .microphoneDenied: "Murmur can’t hear you until it’s allowed in System Settings."
-        case .accessibilityDenied: "Murmur can’t type for you until it’s allowed in System Settings."
-        case .inputMonitoringDenied: "Your shortcut won’t work in other apps until it’s allowed in System Settings."
+        case .accessibilityDenied: "Murmur can’t notice your shortcut or type for you until it’s allowed in System Settings."
         case .secureInput: "macOS blocks typing into secure fields, so Murmur discarded this take. It wasn’t saved or copied."
         case .nothingHeard: "No speech was detected, so nothing was typed."
         case .noInputDevice: "Connect a microphone or pick another one in Settings, then try again."

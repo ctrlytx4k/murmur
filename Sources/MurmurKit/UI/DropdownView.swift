@@ -444,7 +444,7 @@ struct DropdownView: View {
                 Image(systemName: "checkmark.circle").font(.system(size: 14, weight: .medium)).foregroundStyle(Tokens.success)
                 Text("Permissions OK").font(.mmCallout).foregroundStyle(Tokens.labelSecondary)
                 Spacer()
-                Text("Mic · Accessibility · Input").font(.system(size: 11)).foregroundStyle(Tokens.labelTertiary)
+                Text("Mic · Accessibility").font(.system(size: 11)).foregroundStyle(Tokens.labelTertiary)
             }
             .padding(.horizontal, 10)
             .frame(height: 32)
@@ -493,7 +493,6 @@ extension DictationError {
         switch permission {
         case .microphone: .microphoneDenied
         case .accessibility: .accessibilityDenied
-        case .inputMonitoring: .inputMonitoringDenied
         }
     }
 }

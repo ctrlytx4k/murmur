@@ -192,7 +192,7 @@ import Testing
 
     @Test func everyFailureHasWordsForTheUser() {
         let errors: [DictationError] = [
-            .microphoneDenied, .accessibilityDenied, .inputMonitoringDenied, .secureInput, .nothingHeard, .noInputDevice,
+            .microphoneDenied, .accessibilityDenied, .secureInput, .nothingHeard, .noInputDevice,
             .insertionFailed(appName: "Notes"), .transcriptionFailed("why"), .engineUnavailable("why"), .modelNotReady(name: "parakeet-v3", progress: 0.4),
         ]
         for error in errors { #expect(!error.title.isEmpty && !error.message.isEmpty) }
@@ -205,8 +205,10 @@ import Testing
 
     @Test func permissionSnapshotsListWhatIsMissing() {
         #expect(PermissionSnapshot.allGranted.allGranted && PermissionSnapshot.allGranted.missing.isEmpty)
-        let snapshot = PermissionSnapshot(microphone: true, accessibility: false, inputMonitoring: false)
-        #expect(snapshot.missing == [.accessibility, .inputMonitoring] && !snapshot.allGranted)
+        let snapshot = PermissionSnapshot(microphone: true, accessibility: false)
+        #expect(snapshot.missing == [.accessibility] && !snapshot.allGranted)
+        // Two permissions, and no third: Input Monitoring is never asked for.
+        #expect(Permission.allCases == [.microphone, .accessibility])
         #expect(snapshot.isGranted(.microphone) && !snapshot.isGranted(.accessibility))
     }
 

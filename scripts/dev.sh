@@ -27,7 +27,7 @@ bundle() {
   cp Support/AppIcon.icns "$app/Contents/Resources/"
   # Local runs only; release signing is not set up yet. A self-signed "Murmur Local Dev"
   # certificate in the keychain keeps the signature the same across rebuilds, so macOS keeps the
-  # Accessibility and Input Monitoring grants. Without one we fall back to ad-hoc.
+  # Accessibility grant. Without one we fall back to ad-hoc.
   identity="${MURMUR_SIGN_IDENTITY:-Murmur Local Dev}"
   if security find-identity -p codesigning | grep -q "\"$identity\""; then
     codesign --force --sign "$identity" "$app" 2>/dev/null
