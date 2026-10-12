@@ -207,6 +207,15 @@ final class FakeTransport: ProviderTransport, @unchecked Sendable {
         rig.transport.respond { _ in (401, #"{"error":"nope"}"#) }
         await #expect(throws: ProviderError.http(401)) { try await rig.router.models(for: claude, key: "bad") }
         #expect(ProviderError.http(401).summary == "The API key was not accepted")
+
+        // A valid key with nothing to spend lists models, then says why it cannot clean anything.
+        rig.transport.respond { _ in (429, #"{"error":{"message":"You exceeded your current quota.","type":"insufficient_quota","code":"insufficient_quota"}}"#) }
+        await #expect(throws: ProviderError.noCredit) { try await rig.router.test(ProviderConfig(kind: .openAI, model: "some-model"), key: "k") }
+        rig.transport.respond { _ in (400, #"{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}"#) }
+        await #expect(throws: ProviderError.noCredit) { try await rig.router.test(claude, key: "k") }
+        rig.transport.respond { _ in (429, #"{"error":{"type":"rate_limit_error"}}"#) }
+        await #expect(throws: ProviderError.http(429)) { try await rig.router.test(claude, key: "k") }
+        #expect(ProviderError.noCredit.summary == "The key works, but its account has no credit left")
     }
 
     // MARK: the reply is checked

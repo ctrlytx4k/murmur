@@ -144,6 +144,8 @@ public nonisolated enum ProviderError: Error, Equatable, Sendable {
     case timeout
     case unreachable
     case http(Int)
+    /// The key is valid but the account behind it has nothing left to spend.
+    case noCredit
     case badResponse
     /// The model declined, or stopped before it finished.
     case refused, truncated
@@ -158,6 +160,7 @@ public nonisolated enum ProviderError: Error, Equatable, Sendable {
         case .insecureAddress: "A server that isn’t on this Mac needs an https address"
         case .timeout: "No answer within 8 seconds"
         case .unreachable: "Couldn’t reach the server"
+        case .noCredit: "The key works, but its account has no credit left"
         case .http(401), .http(403): "The API key was not accepted"
         case .http(404): "The server doesn’t know that model or address"
         case .http(429): "The provider is rate-limiting this key"
@@ -379,6 +382,14 @@ public nonisolated enum ProviderAPI {
         return provider.kind == .anthropic ? models : models.sorted { $0.id < $1.id }
     }
 
+    /// Why a request was turned down. Only the kind is kept: the server's words are never stored or logged.
+    static func failure(status: Int, _ data: Data) -> ProviderError {
+        let text = String(data: data, encoding: .utf8)?.lowercased() ?? ""
+        // OpenAI answers 429 "insufficient_quota"; Anthropic answers 400 with "credit balance is too low".
+        if text.contains("insufficient_quota") || text.contains("credit balance") || text.contains("billing_not_active") { return .noCredit }
+        return .http(status)
+    }
+
     /// What a refused request complained about, to try once more without it. Read from the error, never stored or logged.
     static func adjusted(_ provider: ProviderConfig, after data: Data) -> ProviderConfig? {
         guard provider.kind != .anthropic, let text = String(data: data, encoding: .utf8)?.lowercased() else { return nil }
@@ -457,7 +468,7 @@ public struct RemoteProvider: CleanupProvider {
             tries += 1
             (data, status) = try await send(ProviderAPI.chatRequest(config, key: key, system: CleanupPrompt.system(style: instructions), user: CleanupPrompt.user(text)), purpose: purpose)
         }
-        guard status == 200 else { throw ProviderError.http(status) }
+        guard status == 200 else { throw ProviderAPI.failure(status: status, data) }
         let cleaned = CleanupCheck.tidy(try ProviderAPI.parseChat(config, data))
         guard CleanupCheck.acceptsProviderReply(raw: text, cleaned: cleaned) else { throw ProviderError.rejected }
         return (cleaned, config)
