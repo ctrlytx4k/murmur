@@ -397,7 +397,7 @@ struct OverlayView: View {
 
     private var targetLabel: some View {
         HStack(spacing: 7) {
-            if let icon = controller.target?.bundleIdentifier.flatMap(AppIcons.icon(forBundleIdentifier:)) {
+            if let icon = controller.target?.bundleIdentifier.flatMap({ AppIcons.icon(forBundleIdentifier: $0) }) {
                 Image(nsImage: icon).resizable().frame(width: 18, height: 18)
             } else {
                 Image(systemName: "text.cursor").font(.system(size: 11, weight: .semibold)).foregroundStyle(Tokens.labelSecondary).frame(width: 18, height: 18)
@@ -435,12 +435,5 @@ private struct Sweep: View {
             withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: false)) { moving = true }
         }
         .accessibilityHidden(true)
-    }
-}
-
-enum AppIcons {
-    static func icon(forBundleIdentifier id: String) -> NSImage? {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else { return nil }
-        return NSWorkspace.shared.icon(forFile: url.path)
     }
 }

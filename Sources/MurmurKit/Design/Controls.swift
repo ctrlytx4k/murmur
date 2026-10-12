@@ -134,24 +134,6 @@ struct IconButton: View {
     }
 }
 
-/// App icon when the app is installed, otherwise a lettered tile.
-struct AppBadge: View {
-    let name: String
-    let bundleIdentifier: String?
-    var size: CGFloat = 18
-
-    var body: some View {
-        if let icon = bundleIdentifier.flatMap(AppIcons.icon(forBundleIdentifier:)) {
-            Image(nsImage: icon).resizable().frame(width: size, height: size)
-        } else {
-            Text(String(name.prefix(1)).uppercased())
-                .font(.system(size: size * 0.52, weight: .bold)).foregroundStyle(.white)
-                .frame(width: size, height: size)
-                .background(Tokens.labelTertiary, in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
-        }
-    }
-}
-
 /// Five green bars for the microphone in use. Only shows during a take: that is the only time
 /// Murmur listens, so it is the only time there is a level to show.
 struct ActiveMicMeter: View {
