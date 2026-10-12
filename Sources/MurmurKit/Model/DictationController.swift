@@ -240,10 +240,12 @@ public final class DictationController {
 
         // Cleanup is optional and never blocks a take: if it fails, the raw text goes in and is marked Raw.
         var text = raw
+        var wasCleaned = false
         if settings.mode == .cleaned, settings.cleanupEnabled, let cleanup, let instructions = cleanupInstructions(for: target) {
             let began = now()
             do {
                 text = try await cleanup.clean(raw, instructions: instructions)
+                wasCleaned = true
                 DebugLog.log("cleanup done in \(Int(now().timeIntervalSince(began) * 1000)) ms\(text == raw ? ", no change" : "")")
             } catch {
                 // Only the kind of failure: a model error can quote the transcript.
@@ -253,7 +255,7 @@ public final class DictationController {
             guard token == stateToken else { return }
         }
         if settings.mode == .cleaned, text == raw, !(settings.cleanupEnabled && cleanup != nil) { DebugLog.log("cleanup skipped: switched off") }
-        await insert(text, token: token, raw: text == raw ? nil : raw, mode: text == raw ? .raw : .cleaned, audioSeconds: seconds)
+        await insert(text, token: token, raw: text == raw ? nil : raw, mode: wasCleaned ? .cleaned : .raw, audioSeconds: seconds)
     }
 
     /// The cleanup instructions for a take into this app, or nil when a per-app rule says to leave it raw.
