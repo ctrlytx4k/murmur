@@ -7,17 +7,19 @@ public final class Stores {
     public let settings: SettingsStore
     public let dictionary: DictionaryStore
     public let history: HistoryStore
+    public let stats: StatsStore
     public let network: NetworkLog
     public let catalog: ModelCatalog
     /// True with `--demo`: simulated services and sample data.
     public let isDemo: Bool
     let overlay = OverlayPanelState()
 
-    public init(controller: DictationController, settings: SettingsStore, dictionary: DictionaryStore, history: HistoryStore, network: NetworkLog, catalog: ModelCatalog, isDemo: Bool) {
+    public init(controller: DictationController, settings: SettingsStore, dictionary: DictionaryStore, history: HistoryStore, stats: StatsStore, network: NetworkLog, catalog: ModelCatalog, isDemo: Bool) {
         self.controller = controller
         self.settings = settings
         self.dictionary = dictionary
         self.history = history
+        self.stats = stats
         self.network = network
         self.catalog = catalog
         self.isDemo = isDemo

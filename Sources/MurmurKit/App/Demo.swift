@@ -110,6 +110,7 @@ enum DemoData {
                 entry(1385, "Xcode", "com.apple.dt.Xcode", .raw, "add a guard for the empty array case before the loop", seconds: 5),
             ])
         }
+        if stores.stats.rows.isEmpty { stores.stats.replaceAll(StatsFixture.rows(today: Stats.today())) }
         if stores.network.entries.isEmpty {
             stores.network.record(host: "github.com", reason: "Update check (signed feed)", bytes: 4_096, date: Date().addingTimeInterval(-3 * 86_400))
             stores.network.record(host: "huggingface.co", reason: "Model download · parakeet-v3", bytes: 480_000_000, date: Date().addingTimeInterval(-3_000))
@@ -123,5 +124,78 @@ enum DemoData {
                 AppPreset(bundleIdentifier: "com.apple.Terminal", name: "Terminal", preset: "raw"),
             ]
         }
+    }
+}
+
+/// Sample stats that reproduce the numbers on the mockup's Stats board: 8,412 words in the last 7 days
+/// against 7,511 before, 63 takes, 58 minutes of talking. Used with `--demo`, for snapshots and in tests.
+enum StatsFixture {
+    /// The day the mockup was drawn on: a Monday, with Wed Oct 7 as its tallest bar.
+    static let mockupToday = LocalDay("2026-10-12")
+
+    private static let apps: [String: String] = [
+        "Slack": "com.tinyspeck.slackmacgap", "Mail": "com.apple.mail", "Notes": "com.apple.Notes", "Xcode": "com.apple.dt.Xcode",
+        "Messages": "com.apple.MobileSMS", "Safari": "com.apple.Safari", "Terminal": "com.apple.Terminal",
+    ]
+
+    static func rows(today: LocalDay = mockupToday) -> [TakeStat] {
+        var rows: [TakeStat] = []
+        // The last 7 days, oldest first: takes, seconds of talking, and words by app.
+        let week: [(takes: Int, seconds: Int, words: [(String, Int)])] = [
+            (12, 660, [("Slack", 700), ("Mail", 400), ("Notes", 250), ("Xcode", 229)]),
+            (14, 780, [("Slack", 810), ("Mail", 458), ("Notes", 300), ("Xcode", 238), ("Messages", 100)]),
+            (10, 549, [("Slack", 560), ("Mail", 330), ("Notes", 200), ("Xcode", 236)]),
+            (13, 780, [("Slack", 780), ("Mail", 420), ("Notes", 287), ("Xcode", 237), ("Terminal", 160)]),
+            (3, 109, [("Notes", 153), ("Messages", 110)]),
+            (8, 473, [("Notes", 420), ("Mail", 300), ("Safari", 232), ("Messages", 100), ("Slack", 90)]),
+            (3, 129, [("Slack", 180), ("Mail", 132)]),
+        ]
+        for (index, day) in week.enumerated() {
+            rows += spread(day.words, takes: day.takes, seconds: day.seconds, on: today.adding(index - 6))
+        }
+        // The 7 days before, and a lighter month before that.
+        let before: [(Int, Int)] = [(1421, 10), (1305, 9), (1663, 12), (1200, 9), (0, 0), (537, 4), (1385, 10)]
+        for (index, day) in before.enumerated() where day.0 > 0 {
+            rows += spread(split(day.0), takes: day.1, seconds: day.0 * 60 / 145, on: today.adding(index - 13))
+        }
+        let earlier = [900, 1240, 0, 760, 1480, 320, 1110, 0, 980, 640]
+        for back in 14..<46 {
+            let words = earlier[back % earlier.count]
+            if words > 0 { rows += spread(split(words), takes: max(3, words / 140), seconds: words * 60 / 145, on: today.adding(-back)) }
+        }
+        return rows.sorted { $0.endedAt < $1.endedAt }
+    }
+
+    private static func split(_ words: Int) -> [(String, Int)] {
+        let mail = words * 35 / 100, notes = words * 25 / 100
+        return [("Slack", words - mail - notes), ("Mail", mail), ("Notes", notes)]
+    }
+
+    /// Turns one day's words-by-app into takes: every app gets at least one, the rest go to the busiest,
+    /// and the day's talking time is shared out by words so the pace is the same all day.
+    private static func spread(_ cells: [(String, Int)], takes: Int, seconds: Int, on day: LocalDay) -> [TakeStat] {
+        var counts = cells.map { _ in 1 }
+        for _ in 0..<max(0, takes - cells.count) {
+            let busiest = cells.indices.max { Double(cells[$0].1) / Double(counts[$0]) < Double(cells[$1].1) / Double(counts[$1]) } ?? 0
+            counts[busiest] += 1
+        }
+        var parts: [(app: String, words: Int)] = []
+        for (cell, count) in zip(cells, counts) {
+            for i in 0..<count { parts.append((cell.0, cell.1 / count + (i < cell.1 % count ? 1 : 0))) }
+        }
+        let total = max(parts.reduce(0) { $0 + $1.words }, 1)
+        var rows: [TakeStat] = []
+        var wordsSoFar = 0, secondsSoFar = 0
+        for (index, part) in parts.enumerated() {
+            wordsSoFar += part.words
+            let upTo = Int((Double(wordsSoFar) / Double(total) * Double(seconds)).rounded())
+            let hour = 9 + index * 9 / max(parts.count, 1)
+            rows.append(TakeStat(
+                endedAt: day.noon.addingTimeInterval(Double(hour - 12) * 3600 + Double(index) * 60), localDay: day.key, localHour: hour,
+                bundleID: apps[part.app], appName: part.app, rawWords: part.words, insertedWords: part.words,
+                recordingSeconds: Double(upTo - secondsSoFar), waitSeconds: 2, outcome: .inserted))
+            secondsSoFar = upTo
+        }
+        return rows
     }
 }

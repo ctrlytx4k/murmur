@@ -161,6 +161,14 @@ public final class SettingsStore {
     public var offlineMode: Bool { didSet { save(offlineMode, "offlineMode") } }
     public var logsNetworkActivity: Bool { didSet { save(logsNetworkActivity, "logsNetworkActivity") } }
     public var retention: Retention { didSet { save(retention.rawValue, "retention") } }
+    /// Off: no take is counted. Rows already counted stay until Reset stats.
+    public var keepStats: Bool { didSet { save(keepStats, "keepStats") } }
+    /// The typing speed "time saved" is measured against. Changing it recalculates every take.
+    public var typingWPM: Int { didSet {
+        let allowed = min(max(typingWPM, Self.typingWPMRange.lowerBound), Self.typingWPMRange.upperBound)
+        if allowed != typingWPM { typingWPM = allowed } else { save(typingWPM, "typingWPM") }
+    } }
+    public static let typingWPMRange = 10...150
 
     // Advanced
     public var insertMethod: InsertMethod { didSet { save(insertMethod.rawValue, "insertMethod") } }
@@ -219,6 +227,9 @@ public final class SettingsStore {
         offlineMode = bool("offlineMode", false)
         logsNetworkActivity = bool("logsNetworkActivity", true)
         retention = raw("retention", .month)
+        keepStats = bool("keepStats", true)
+        let savedWPM = defaults.object(forKey: "typingWPM") as? Int ?? 40
+        typingWPM = min(max(savedWPM, Self.typingWPMRange.lowerBound), Self.typingWPMRange.upperBound)
 
         insertMethod = raw("insertMethod", .pasting)
         restoresClipboard = bool("restoresClipboard", true)
@@ -243,7 +254,7 @@ public final class SettingsStore {
         language = fresh.language
         cleanupEnabled = fresh.cleanupEnabled; cleanupPreset = fresh.cleanupPreset; customInstructions = ""; appPresets = []
         offlineMode = fresh.offlineMode; logsNetworkActivity = fresh.logsNetworkActivity
-        retention = fresh.retention
+        retention = fresh.retention; keepStats = fresh.keepStats; typingWPM = fresh.typingWPM
         insertMethod = fresh.insertMethod; restoresClipboard = fresh.restoresClipboard
         addsTrailingSpace = fresh.addsTrailingSpace
         maxLength = fresh.maxLength; debugLog = fresh.debugLog
@@ -258,7 +269,7 @@ public final class SettingsStore {
             "model": modelID, "language": language,
             "cleanup": cleanupEnabled ? cleanupPreset.rawValue : "off", "insertBy": insertMethod.rawValue,
             "restoresClipboard": String(restoresClipboard), "offlineMode": String(offlineMode),
-            "retention": retention.rawValue, "appearance": appearance.rawValue, "accent": accent.rawValue,
+            "retention": retention.rawValue, "keepStats": String(keepStats), "appearance": appearance.rawValue, "accent": accent.rawValue,
         ]
     }
 

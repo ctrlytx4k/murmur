@@ -30,11 +30,13 @@ public final class DictationController {
     @ObservationIgnored private let settings: SettingsStore
     @ObservationIgnored private let cleanup: (any TextCleanupService)?
     @ObservationIgnored private let history: HistoryStore?
+    @ObservationIgnored private let stats: StatsStore?
     @ObservationIgnored private let dictionary: DictionaryStore?
     @ObservationIgnored private let maxLengthScale: Double
     @ObservationIgnored private let tapThreshold: TimeInterval
     @ObservationIgnored private var pressedAt = Date.distantPast
     @ObservationIgnored private var recordingStarted = Date.distantPast
+    @ObservationIgnored private var recordingStopped = Date.distantPast
     @ObservationIgnored private let frontmostApp: @MainActor () -> TargetApp?
     @ObservationIgnored private let copyToClipboard: @MainActor (String) -> Void
     @ObservationIgnored private let now: () -> Date
@@ -61,6 +63,7 @@ public final class DictationController {
         settings: SettingsStore,
         cleanup: (any TextCleanupService)? = nil,
         history: HistoryStore? = nil,
+        stats: StatsStore? = nil,
         dictionary: DictionaryStore? = nil,
         maxLengthScale: Double = 1,
         tapThreshold: TimeInterval = 0.4,
@@ -77,6 +80,7 @@ public final class DictationController {
         self.settings = settings
         self.cleanup = cleanup
         self.history = history
+        self.stats = stats
         self.dictionary = dictionary
         self.maxLengthScale = maxLengthScale
         self.tapThreshold = tapThreshold
@@ -165,6 +169,7 @@ public final class DictationController {
 
     public func stopAndInsert() {
         guard state.isRecording else { return copiesInstead = false }
+        recordingStopped = now()
         let token = set(.processing)
         pendingWork = Task { await self.finish(token) }
     }
@@ -237,6 +242,7 @@ public final class DictationController {
             return fail(.transcriptionFailed(error.localizedDescription), ifStill: token)
         }
         guard token == stateToken else { return }  // cancelled meanwhile
+        let measure = TakeMeasure(rawWords: WordCount.count(heard), recordingSeconds: max(0, recordingStopped.timeIntervalSince(recordingStarted)), stoppedAt: recordingStopped)
         guard !heard.isEmpty else {
             // A brush of the shortcut is not a take worth reporting. A longer silence still is.
             if seconds < briefTake {
@@ -248,7 +254,7 @@ public final class DictationController {
 
         // A snippet trigger replaces the whole take and skips cleanup.
         if let dictionary, let snippet = TextProcessor.snippet(for: heard, in: dictionary.snippets) {
-            return await deliver(TextProcessor.expand(snippet.text, now: now()), copies: copies, token: token, raw: nil, mode: .raw, audioSeconds: seconds)
+            return await deliver(TextProcessor.expand(snippet.text, now: now()), copies: copies, token: token, raw: nil, mode: .raw, audioSeconds: seconds, measure: measure)
         }
         let raw = dictionary.map { TextProcessor.applyDictionary($0.entries, to: heard, app: target?.name) } ?? heard
 
@@ -269,11 +275,11 @@ public final class DictationController {
             guard token == stateToken else { return }
         }
         if settings.mode == .cleaned, text == raw, !(settings.cleanupEnabled && cleanup != nil) { DebugLog.log("cleanup skipped: switched off") }
-        await deliver(text, copies: copies, token: token, raw: text == raw ? nil : raw, mode: wasCleaned ? .cleaned : .raw, audioSeconds: seconds)
+        await deliver(text, copies: copies, token: token, raw: text == raw ? nil : raw, mode: wasCleaned ? .cleaned : .raw, audioSeconds: seconds, measure: measure)
     }
 
-    private func deliver(_ text: String, copies: Bool, token: Int, raw: String?, mode: DictationMode, audioSeconds: Double) async {
-        guard copies else { return await insert(text, token: token, raw: raw, mode: mode, audioSeconds: audioSeconds) }
+    private func deliver(_ text: String, copies: Bool, token: Int, raw: String?, mode: DictationMode, audioSeconds: Double, measure: TakeMeasure) async {
+        guard copies else { return await insert(text, token: token, raw: raw, mode: mode, audioSeconds: audioSeconds, measure: measure) }
         // Nothing is typed, so there is nothing to undo and no password field to worry about.
         let app = target?.name ?? "the front app"
         copyToClipboard(text)
@@ -283,8 +289,9 @@ public final class DictationController {
         history?.add(
             HistoryEntry(date: now(), appName: app, bundleIdentifier: target?.bundleIdentifier, mode: mode, text: text, raw: raw, audioSeconds: audioSeconds, engine: engine.displayName),
             retention: settings.retention)
+        count(measure, text: text, outcome: .copied)
         guard token == stateToken else { return }
-        let held = set(.inserted(InsertionSummary(appName: app, wordCount: text.split(whereSeparator: \.isWhitespace).count, copied: true)))
+        let held = set(.inserted(InsertionSummary(appName: app, wordCount: WordCount.count(text), copied: true)))
         returnToIdle(after: insertedHold, ifStill: held)
     }
 
@@ -298,7 +305,24 @@ public final class DictationController {
         return preset == .custom ? settings.customInstructions : preset.builtInInstructions
     }
 
-    private func insert(_ text: String, token: Int, raw: String? = nil, mode: DictationMode? = nil, audioSeconds: Double = 0) async {
+    /// What a take measured before its text was ready. A re-insert has none: it is not a take.
+    private struct TakeMeasure {
+        var rawWords: Int
+        var recordingSeconds: Double
+        var stoppedAt: Date
+    }
+
+    /// One stats row for a take whose text landed. Counts and times only, never the text.
+    private func count(_ measure: TakeMeasure?, text: String, outcome: TakeStat.Outcome) {
+        guard let measure, let stats, settings.keepStats else { return }
+        let landed = now()
+        stats.record(TakeStat(
+            endedAt: landed, timeZone: .current, bundleID: target?.bundleIdentifier, appName: target?.name ?? "Unknown app",
+            rawWords: measure.rawWords, insertedWords: WordCount.count(text),
+            recordingSeconds: measure.recordingSeconds, waitSeconds: max(0, landed.timeIntervalSince(measure.stoppedAt)), outcome: outcome))
+    }
+
+    private func insert(_ text: String, token: Int, raw: String? = nil, mode: DictationMode? = nil, audioSeconds: Double = 0, measure: TakeMeasure? = nil) async {
         // Checked at the last moment: the user may have tabbed into a password field while speaking.
         guard !insertion.isSecureInputActive else { return fail(.secureInput, ifStill: token) }
         let app = target?.name ?? "the front app"
@@ -311,8 +335,9 @@ public final class DictationController {
             history?.add(
                 HistoryEntry(date: now(), appName: app, bundleIdentifier: target?.bundleIdentifier, mode: mode, text: text, raw: raw, audioSeconds: audioSeconds, engine: engine.displayName),
                 retention: settings.retention)
+            count(measure, text: text, outcome: .inserted)
             guard token == stateToken else { return }
-            let words = text.split(whereSeparator: \.isWhitespace).count
+            let words = WordCount.count(text)
             let held = set(.inserted(InsertionSummary(appName: app, wordCount: words)))
             returnToIdle(after: insertedHold, ifStill: held)
         } catch {
