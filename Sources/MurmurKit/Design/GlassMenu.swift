@@ -155,6 +155,7 @@ final class GlassMenuPresenter {
         panel.contentView = tracking
         panel.appearance = window.effectiveAppearance
         panel.setFrame(NSRect(x: x - margin, y: y - margin, width: measured.width, height: measured.height), display: true)
+        host.layoutSubtreeIfNeeded()
         panel.orderFrontRegardless()
         openID = id
 
@@ -271,13 +272,21 @@ struct GlassMenu: View {
         }
         .padding(6)
         .modifier(GlassMenuSurface())
+        // The menu is laid out once, in place. Only the scale and the fade below animate: if layout were
+        // allowed to animate too, the rows would slide in from wherever the first pass happened to put them.
+        .transaction { $0.animation = nil }
         .scaleEffect(shown || reduceMotion ? 1 : 0.96, anchor: opensUpward ? .bottomTrailing : .topTrailing)
         .opacity(shown ? 1 : 0)
+        .animation(.easeOut(duration: 0.16), value: appeared)
         .padding(GlassMenuPanel.margin)
         .coordinateSpace(name: "glass-menu")
         .onPreferenceChange(GlassMenuRowFrames.self) { frames in presenter?.frames = frames }
         .foregroundStyle(Tokens.label)
-        .onAppear { withAnimation(.easeOut(duration: 0.16)) { appeared = true } }
+        .task {
+            // One turn of the run loop, so the first layout is on screen before anything moves.
+            await Task.yield()
+            appeared = true
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Menu")
     }
