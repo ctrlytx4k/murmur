@@ -98,6 +98,8 @@ public final class SettingsStore {
             }
         }
     }
+    public enum MeetingSource: String, CaseIterable, Sendable { case microphoneAndCall = "Microphone and call audio", microphoneOnly = "Microphone only" }
+    public enum MeetingAudio: String, CaseIterable, Sendable { case delete = "Delete the audio", keep = "Keep the audio" }
     public enum InsertMethod: String, CaseIterable, Sendable { case pasting = "Pasting", typing = "Typing" }
     public enum MaxLength: String, CaseIterable, Sendable { case one = "1 minute", five = "5 minutes", fifteen = "15 minutes", thirty = "30 minutes"
         public var seconds: Double {
@@ -135,6 +137,13 @@ public final class SettingsStore {
         let allowed = overlay.clamped
         if allowed != overlay { overlay = allowed } else { saveCodable(overlay, "overlayAppearance") }
     } }
+
+    // Meetings
+    public var meetingSource: MeetingSource { didSet { save(meetingSource.rawValue, "meetingSource") } }
+    /// What happens to the recording once it is transcribed. The transcript is always kept.
+    public var meetingAudio: MeetingAudio { didSet { save(meetingAudio.rawValue, "meetingAudio") } }
+    /// macOS does not say whether System Audio Recording is allowed, only that we asked.
+    public var askedForSystemAudio: Bool { didSet { save(askedForSystemAudio, "askedForSystemAudio") } }
 
     // Hotkeys
     public var shortcut: Shortcut { didSet { saveCodable(shortcut, "shortcut") } }
@@ -215,6 +224,10 @@ public final class SettingsStore {
         }
         overlay = codable("overlayAppearance", OverlayAppearance())
 
+        meetingSource = raw("meetingSource", .microphoneAndCall)
+        meetingAudio = raw("meetingAudio", .delete)
+        askedForSystemAudio = bool("askedForSystemAudio", false)
+
         shortcut = codable("shortcut", .rightOption)
         behavior = raw("behavior", .pushToTalk)
         doubleTapToLock = bool("doubleTapToLock", true)
@@ -257,6 +270,7 @@ public final class SettingsStore {
         showInDock = fresh.showInDock; soundsEnabled = fresh.soundsEnabled; soundSet = fresh.soundSet
         overlay = OverlayAppearance(); accent = fresh.accent; appearance = fresh.appearance
         microphoneID = nil
+        meetingSource = fresh.meetingSource; meetingAudio = fresh.meetingAudio
         shortcut = fresh.shortcut; behavior = fresh.behavior; doubleTapToLock = fresh.doubleTapToLock
         cycleModeShortcut = fresh.cycleModeShortcut; reinsertShortcut = fresh.reinsertShortcut
         historyShortcut = fresh.historyShortcut; acceptedConflicts = []
