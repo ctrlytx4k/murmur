@@ -626,6 +626,20 @@ private final class FakeMeetingAudio: MeetingAudioService {
         #expect(rig.controller.state == .idle && rig.store.meetings.isEmpty && !FileManager.default.fileExists(atPath: folder.path))
     }
 
+    @Test func thePillAnnouncesATranscribedMeetingAndNeverADiscardedOne() {
+        let first = UUID()
+        var finished = FinishedMeeting()
+        // Record, stop, transcribe: announced once, when the work ends.
+        #expect(finished.next(.recording(since: Date())) == nil)
+        #expect(finished.next(.transcribing(id: first, progress: 0)) == nil)
+        #expect(finished.next(.transcribing(id: first, progress: 0.5)) == nil)
+        #expect(finished.next(.idle) == first)
+        #expect(finished.next(.idle) == nil)
+        // Record, then discard: the earlier meeting is not announced again.
+        #expect(finished.next(.recording(since: Date())) == nil)
+        #expect(finished.next(.idle) == nil)
+    }
+
     @Test func quittingMidMeetingKeepsTheRecordingForLater() async {
         let folder = directory()
         let settings = SettingsStore(defaults: UserDefaults(suiteName: "murmur-tests-\(UUID().uuidString)")!)

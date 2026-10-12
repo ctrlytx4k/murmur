@@ -105,7 +105,8 @@ nonisolated struct OverlayPlacement: Equatable {
 
     /// `visible` is the screen without the menu bar and the Dock. `caret` is only passed for "under the cursor";
     /// without one the card goes to the bottom, where it has always been.
-    static func resolve(_ appearance: OverlayAppearance, canvas: CGSize, visible: CGRect, caret: CGRect?, margin: CGFloat) -> OverlayPlacement {
+    /// `avoiding` is something else of Murmur's at the top of the screen (the meeting pill): a card at the top goes under it.
+    static func resolve(_ appearance: OverlayAppearance, canvas: CGSize, visible: CGRect, caret: CGRect?, margin: CGFloat, avoiding: CGRect? = nil) -> OverlayPlacement {
         let centered = (visible.midX - canvas.width / 2).rounded()
         if appearance.position == .underCursor, let caret {
             let lowest = visible.minX + gap - margin, highest = visible.maxX - gap + margin - canvas.width
@@ -117,7 +118,12 @@ nonisolated struct OverlayPlacement: Equatable {
             return OverlayPlacement(origin: CGPoint(x: x, y: (caret.maxY + gap - margin).rounded()), growsDown: false)
         }
         if appearance.position == .top {
-            return OverlayPlacement(origin: CGPoint(x: centered, y: (visible.maxY - appearance.edgeDistance + margin - canvas.height).rounded()), growsDown: true)
+            var top = visible.maxY - appearance.edgeDistance
+            let half = appearance.size.cardWidth / 2
+            if let avoiding, avoiding.minX < visible.midX + half, avoiding.maxX > visible.midX - half, avoiding.minY < top, avoiding.maxY > top - tallestCard {
+                top = avoiding.minY - gap
+            }
+            return OverlayPlacement(origin: CGPoint(x: centered, y: (top + margin - canvas.height).rounded()), growsDown: true)
         }
         return OverlayPlacement(origin: CGPoint(x: centered, y: (visible.minY + appearance.edgeDistance - margin).rounded()), growsDown: false)
     }
@@ -131,6 +137,7 @@ final class OverlayController {
     private let panels: OverlayPanelState
     private let view: AnyView
     private let caretRect: @MainActor () -> CGRect?
+    private let avoiding: @MainActor () -> CGRect?
     private var growsDown: Bool?
     private var frame = NSRect.zero
     private var isShown = false
@@ -138,7 +145,8 @@ final class OverlayController {
     private var caret: CGRect?
     private var lookedForCaret = false
 
-    init(stores: Stores, actions: AppActions, caretRect: @escaping @MainActor () -> CGRect? = CaretLocator.caretRect) {
+    init(stores: Stores, actions: AppActions, caretRect: @escaping @MainActor () -> CGRect? = CaretLocator.caretRect, avoiding: @escaping @MainActor () -> CGRect? = { nil }) {
+        self.avoiding = avoiding
         self.controller = stores.controller
         self.settings = stores.settings
         self.panels = stores.overlay
@@ -179,7 +187,7 @@ final class OverlayController {
         }
         let anchor = appearance.position == .underCursor ? caret : nil
         guard let screen = screen(for: appearance, caret: anchor) else { return }
-        let placement = OverlayPlacement.resolve(appearance, canvas: Self.canvas, visible: screen.visibleFrame, caret: anchor, margin: FloatingPanel.margin)
+        let placement = OverlayPlacement.resolve(appearance, canvas: Self.canvas, visible: screen.visibleFrame, caret: anchor, margin: FloatingPanel.margin, avoiding: isShown ? avoiding() : nil)
         frame = NSRect(origin: placement.origin, size: Self.canvas)
         if placement.growsDown != growsDown {
             growsDown = placement.growsDown
@@ -202,13 +210,34 @@ final class OverlayController {
     }
 }
 
+/// Which meeting the pill announces once the work on it is over: the one that was being transcribed.
+/// A recording that was discarded announces nothing.
+struct FinishedMeeting {
+    private var working: UUID?
+
+    /// Call with every state, in order. Returns a meeting when it has just stopped being worked on.
+    mutating func next(_ state: MeetingController.State) -> UUID? {
+        switch state {
+        case .transcribing(let id, _):
+            working = id
+            return nil
+        case .recording:
+            working = nil
+            return nil
+        case .idle:
+            defer { working = nil }
+            return working
+        }
+    }
+}
+
 /// Shows the meeting pill at the top center of the screen while a meeting records or transcribes, and for a
 /// few seconds once it is ready. The pill can be dragged, and it never appears in a screen share.
 final class MeetingPillController {
     private let panel = FloatingPanel(level: .statusBar, allowsKey: false)
     private let controller: MeetingController
     private let pill = MeetingPillState()
-    private var wasBusy = false
+    private var finished = FinishedMeeting()
     private var wasRecording = false
     private var placed = false
     private var hide: Task<Void, Never>?
@@ -249,19 +278,19 @@ final class MeetingPillController {
             pill.showsReminder = false
         }
         wasRecording = recording
+        let done = finished.next(controller.state)
         if busy {
             hide?.cancel()
             pill.finished = nil
-        } else if wasBusy, let latest = controller.latest {
+        } else if let done {
             // Done: say so for a moment, with a way to open it.
-            pill.finished = latest
+            pill.finished = done
             hide?.cancel()
             hide = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(6))
                 if !Task.isCancelled { self?.pill.finished = nil }
             }
         }
-        wasBusy = busy
         // "A call started": the offer stays for half a minute, then counts as Not Now.
         let call = controller.detectedCall
         if call != offered {
@@ -277,6 +306,20 @@ final class MeetingPillController {
         let visible = busy || pill.finished != nil || call != nil
         if visible { panel.fadeIn() } else { panel.fadeOut() }
         watchHover(visible && recording)
+    }
+
+    /// The part of the screen the pill covers while it shows, so the dictation overlay can keep clear of it.
+    var occupied: NSRect? {
+        guard panel.isVisible, panel.alphaValue > 0 else { return nil }
+        let size: CGSize = if controller.detectedCall != nil {
+            CGSize(width: 540, height: 56)
+        } else if controller.state.isRecording, pill.showsReminder, !pill.hovering {
+            CGSize(width: 380, height: 120)
+        } else {
+            CGSize(width: 440, height: 44)
+        }
+        let frame = panel.frame
+        return NSRect(x: frame.midX - size.width / 2, y: frame.maxY - FloatingPanel.margin - size.height, width: size.width, height: size.height)
     }
 
     /// The pill never takes focus, so the pointer is watched directly: resting it on the pill shows the controls.

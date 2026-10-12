@@ -160,7 +160,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             checkForUpdates: { [weak self] in self?.checkForUpdates() },
             quit: { NSApp.terminate(nil) })
         statusItem = StatusItemController(stores: stores, actions: actions)
-        overlay = OverlayController(stores: stores, actions: actions)
+        overlay = OverlayController(stores: stores, actions: actions, avoiding: { [weak self] in self?.meetingPill?.occupied })
         meetingPill = MeetingPillController(stores: stores, actions: actions)
         if !demo {
             callDetector = CallDetector { [weak self] users in self?.stores.meeting.microphoneUsers(users) }

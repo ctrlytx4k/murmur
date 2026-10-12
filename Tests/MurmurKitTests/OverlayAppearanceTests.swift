@@ -173,6 +173,26 @@ import Testing
         #expect(overlay.usesEdgeDistance)
     }
 
+    @Test func aCardAtTheTopGoesUnderTheMeetingPill() {
+        var overlay = OverlayAppearance()
+        overlay.position = .top
+        overlay.edgeDistance = 24
+        // The pill with its reminder, top center.
+        let pill = CGRect(x: screen.midX - 190, y: screen.maxY - 126, width: 380, height: 120)
+        let under = OverlayPlacement.resolve(overlay, canvas: canvas, visible: screen, caret: nil, margin: margin, avoiding: pill)
+        #expect(under.growsDown && under.origin.y + canvas.height - margin == pill.minY - 8)
+        // A pill dragged off to the side, or a card already below it, changes nothing.
+        let plain = OverlayPlacement.resolve(overlay, canvas: canvas, visible: screen, caret: nil, margin: margin)
+        #expect(OverlayPlacement.resolve(overlay, canvas: canvas, visible: screen, caret: nil, margin: margin, avoiding: pill.offsetBy(dx: 700, dy: 0)) == plain)
+        overlay.edgeDistance = 140
+        #expect(OverlayPlacement.resolve(overlay, canvas: canvas, visible: screen, caret: nil, margin: margin, avoiding: pill)
+            == OverlayPlacement.resolve(overlay, canvas: canvas, visible: screen, caret: nil, margin: margin))
+        // The bottom position never moves for it.
+        overlay.position = .bottom
+        #expect(OverlayPlacement.resolve(overlay, canvas: canvas, visible: screen, caret: nil, margin: margin, avoiding: pill)
+            == OverlayPlacement.resolve(overlay, canvas: canvas, visible: screen, caret: nil, margin: margin))
+    }
+
     @Test func underTheCursorFollowsTheCaretAndFallsBackToTheBottom() {
         var overlay = OverlayAppearance()
         overlay.position = .underCursor
