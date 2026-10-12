@@ -8,7 +8,8 @@ import Testing
 
     @Test func aFreshInstallStartsWithTheDocumentedDefaults() {
         let settings = SettingsStore(defaults: defaults())
-        #expect(settings.shortcut == .doubleTapOption)
+        #expect(settings.shortcut == .rightOption)
+        #expect(settings.shortcut.keycaps == ["Right ⌥"] && settings.shortcut.isModifierOnly && !settings.shortcut.isDoubleTap)
         #expect(settings.behavior == .pushToTalk && settings.doubleTapToLock)
         #expect(settings.mode == .raw && !settings.cleanupEnabled && settings.cleanupPreset == .lightTouch)
         #expect(settings.modelID == "apple-speech" && settings.language == "English")

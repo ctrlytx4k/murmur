@@ -245,7 +245,7 @@ private struct HotkeysPane: View {
 
     var body: some View {
         SettingsGroup(title: "Dictation") {
-            ShortcutRow(settings: settings, title: "Shortcut", subtitle: "Works in every app while Murmur is running", keyPath: \.shortcut, fallback: .doubleTapOption, first: true)
+            ShortcutRow(settings: settings, title: "Shortcut", subtitle: "Works in every app while Murmur is running", keyPath: \.shortcut, fallback: .rightOption, first: true)
             SettingsRow(
                 title: "Behavior",
                 subtitle: settings.shortcut.isDoubleTap

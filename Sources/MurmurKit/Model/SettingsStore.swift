@@ -205,7 +205,7 @@ public final class SettingsStore {
         hasCompletedOnboarding = bool("hasCompletedOnboarding", false)
         onboardingStep = defaults.integer(forKey: "onboardingStep")
 
-        shortcut = codable("shortcut", .doubleTapOption)
+        shortcut = codable("shortcut", .rightOption)
         behavior = raw("behavior", .pushToTalk)
         doubleTapToLock = bool("doubleTapToLock", true)
         cycleModeShortcut = codable("cycleModeShortcut", Shortcut(keyCode: 46, modifiers: .option))

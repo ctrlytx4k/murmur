@@ -28,7 +28,10 @@ public nonisolated struct Shortcut: Codable, Equatable, Sendable {
 
     public static let relevant: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
     public static let optionSpace = Shortcut(keyCode: UInt16(kVK_Space), modifiers: .option)
-    /// The default: tap Option twice.
+    /// The default: hold the right Option key. Nothing else uses it on its own, it is on every Mac
+    /// keyboard and it types nothing. Double-tap Option, ⌥ Space and double-tap Control are all taken
+    /// by other apps or by macOS Dictation.
+    public static let rightOption = Shortcut(keyCode: UInt16(kVK_RightOption), modifiers: [], isModifierOnly: true)
     public static let doubleTapOption = Shortcut(keyCode: UInt16(kVK_Option), modifiers: [], isDoubleTap: true)
 
     public var modifierFlags: NSEvent.ModifierFlags { NSEvent.ModifierFlags(rawValue: modifiers) }
