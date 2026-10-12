@@ -107,6 +107,46 @@ enum Snapshots {
         st = make(.error(.modelNotReady(name: "parakeet-v3", progress: 0.62)))
         add("overlay-model-downloading", OverlayView(stores: st))
 
+        // Overlay appearance: every material on every backdrop, the three sizes, and the pane.
+        for material in OverlayAppearance.Material.allCases {
+            for backdrop in PreviewBackdrop.allCases {
+                st = make(recording)
+                st.settings.overlay.material = material
+                add("overlay-material-\(material.rawValue)-on-\(backdrop.rawValue)", OverlayPreviewStage(stores: st, backdrop: backdrop).frame(width: 598))
+            }
+        }
+        for size in OverlayAppearance.Size.allCases {
+            st = make(recording)
+            st.settings.overlay.size = size
+            add("overlay-size-\(size.rawValue)", OverlayView(stores: st, sample: .finished))
+            st = make(.processing)
+            st.settings.overlay.size = size
+            add("overlay-size-\(size.rawValue)-processing", OverlayView(stores: st))
+        }
+        for scheme in [OverlayAppearance.CardScheme.light, .dark] {
+            st = make(recording)
+            st.settings.overlay.cardScheme = scheme
+            add("overlay-card-\(scheme.rawValue)", OverlayView(stores: st, sample: .finished))
+        }
+        st = make(recording)
+        st.settings.overlay.showTargetApp = false
+        st.settings.overlay.showKeyHints = false
+        st.settings.overlay.showTimer = false
+        st.settings.overlay.showTranscript = false
+        add("overlay-everything-hidden", OverlayView(stores: st))
+        st = make(.idle)
+        settingsShot("settings-overlay", st, .overlay)
+        // The pane is taller than the window, so here it is in full.
+        add("overlay-pane-full", VStack(alignment: .leading, spacing: 18) { OverlayPane(stores: st) }
+            .padding(28).frame(width: 654).background(Tokens.windowBackground).foregroundStyle(Tokens.label))
+        st = make(.idle)
+        st.settings.overlay.position = .underCursor
+        do {
+            let navigation = SettingsNavigation()
+            navigation.pane = .overlay
+            add("settings-overlay-reduce-transparency", SettingsView(stores: st, navigation: navigation).environment(\.solidOverlay, true))
+        }
+
         st = make(.idle)
         settingsShot("settings-general", st, .general)
         settingsShot("settings-hotkeys", st, .hotkeys)
