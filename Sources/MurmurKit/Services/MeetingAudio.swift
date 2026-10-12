@@ -13,6 +13,9 @@ private nonisolated final class TrackWriter: @unchecked Sendable {
     private var converterRate = 0.0
     private var frames = 0
     private var peak: Float = 0
+    private var buffers = 0
+    private var unreadable = 0
+    private var sourceFormat = ""
     private let started = ProcessInfo.processInfo.systemUptime
     private let report: (@Sendable (Float) -> Void)?
 
@@ -25,10 +28,21 @@ private nonisolated final class TrackWriter: @unchecked Sendable {
         self.report = report
     }
 
+    /// The capture handed over something that could not be turned into a buffer.
+    func noteUnreadable() {
+        lock.lock()
+        unreadable += 1
+        lock.unlock()
+    }
+
     func write(_ buffer: AVAudioPCMBuffer) {
-        guard buffer.frameLength > 0, let mono = Self.mono(buffer) else { return }
+        guard buffer.frameLength > 0, let mono = Self.mono(buffer) else { return noteUnreadable() }
         lock.lock()
         defer { lock.unlock() }
+        buffers += 1
+        if sourceFormat.isEmpty {
+            sourceFormat = "\(Int(buffer.format.sampleRate)) Hz, \(buffer.format.channelCount) ch\(buffer.format.isInterleaved ? ", interleaved" : "")"
+        }
         guard let file, let out = resample(mono), out.frameLength > 0, let data = out.floatChannelData?[0] else { return }
         // Both tracks follow the clock, so they stay lined up: a gap (a device switch, a late start) is written as silence.
         let expected = Int((ProcessInfo.processInfo.systemUptime - started) * Self.sampleRate)
@@ -48,13 +62,14 @@ private nonisolated final class TrackWriter: @unchecked Sendable {
         report?(min(1, (sum / Float(out.frameLength)).squareRoot() * 10))
     }
 
-    /// Closes the file. Returns how long the track is and the loudest sample in it.
-    func close() -> (duration: Double, peak: Float) {
+    /// Closes the file. Returns how long the track is, the loudest sample in it, and a line for the debug log.
+    func close() -> (duration: Double, peak: Float, summary: String) {
         lock.lock()
         defer { lock.unlock() }
         file?.close()
         file = nil
-        return (Double(frames) / Self.sampleRate, peak)
+        let summary = "\(buffers) buffers (\(sourceFormat.isEmpty ? "none arrived" : sourceFormat)), \(unreadable) unreadable, \(String(format: "%.1f", Double(frames) / Self.sampleRate)) s written, peak \(String(format: "%.4f", peak))"
+        return (Double(frames) / Self.sampleRate, peak, summary)
     }
 
     private func resample(_ mono: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
@@ -195,6 +210,7 @@ private final class SystemAudioTap {
         procID = proc
         status = AudioDeviceStart(aggregate, proc)
         guard status == noErr else { throw SystemAudioFailure(step: "starting the capture device", status: status) }
+        DebugLog.log("meeting: call capture started, tap format \(Int(format.sampleRate)) Hz, \(format.channelCount) ch\(format.isInterleaved ? ", interleaved" : "")")
     }
 
     private func detach() {
@@ -224,7 +240,8 @@ private final class SystemAudioTap {
     /// Built outside the main actor: Core Audio calls this block on its own queue.
     private nonisolated static func ioBlock(writer: TrackWriter?, format: AVAudioFormat) -> AudioDeviceIOBlock {
         { _, input, _, _, _ in
-            guard let writer, let buffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: input, deallocator: nil) else { return }
+            guard let writer else { return }
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: input, deallocator: nil) else { return writer.noteUnreadable() }
             writer.write(buffer)
         }
     }
@@ -312,6 +329,8 @@ public final class LiveMeetingAudio: MeetingAudioService {
         onLevel = nil
         let microphoneEnd = microphone?.close()
         let callEnd = call?.close()
+        if let microphoneEnd { DebugLog.log("meeting: microphone track, \(microphoneEnd.summary)") }
+        if let callEnd { DebugLog.log("meeting: call track, \(callEnd.summary)") }
         microphone = nil
         call = nil
         return MeetingRecording(duration: max(microphoneEnd?.duration ?? 0, callEnd?.duration ?? 0), callWasSilent: callEnd.map { $0.peak == 0 } ?? false)
