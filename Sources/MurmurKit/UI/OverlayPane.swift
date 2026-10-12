@@ -96,12 +96,18 @@ private struct OverlayPreview: View {
     var body: some View {
         OverlayPreviewStage(stores: stores, backdrop: backdrop, sample: still ? .finished : sample)
             .overlay(alignment: .topTrailing) {
-                SegmentedPicker(options: PreviewBackdrop.allCases.map { ($0, $0.name) }, selection: $backdrop, height: 22)
-                    .frame(width: 168)
-                    .background(Tokens.elevated.opacity(0.8), in: Pill())
-                    .padding(10)
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel("Preview background")
+                // Named, because "Light" and "Dark" alone read as the card's own appearance, which is set further down.
+                HStack(spacing: 6) {
+                    Text("Wallpaper").font(.system(size: 11, weight: .medium)).foregroundStyle(Tokens.labelSecondary)
+                        .accessibilityHidden(true)
+                    SegmentedPicker(options: PreviewBackdrop.allCases.map { ($0, $0.name) }, selection: $backdrop, height: 22)
+                        .frame(width: 168)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel("Preview wallpaper")
+                }
+                .padding(.leading, 10)
+                .background(Tokens.elevated.opacity(0.8), in: Pill())
+                .padding(10)
             }
             .overlay(alignment: .bottomLeading) {
                 Text("Live preview · changes apply right away").font(.system(size: 11)).foregroundStyle(backdrop.caption)
