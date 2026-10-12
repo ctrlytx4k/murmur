@@ -3,7 +3,7 @@ import FoundationModels
 
 /// Cleanup with the language model built into macOS (Apple Intelligence). It runs on this Mac,
 /// there is nothing to download and nothing leaves the machine.
-public final class AppleCleanup: TextCleanupService {
+public final class AppleCleanup: TextCleanupService, LocalTextModel {
     public init() {}
 
     public var availability: CleanupAvailability {
@@ -32,5 +32,17 @@ public final class AppleCleanup: TextCleanupService {
         let cleaned = CleanupCheck.tidy(try await work.value)
         guard CleanupCheck.accepts(raw: text, cleaned: cleaned) else { throw CleanupFailure.rejected }
         return cleaned
+    }
+
+    public func generate(system: String, user: String) async throws -> String {
+        guard case .available = availability else { throw CleanupFailure.unavailable }
+        let session = LanguageModelSession(instructions: system)
+        let work = Task { try await session.respond(to: user).content }
+        let limit = Task {
+            try await Task.sleep(for: .seconds(60))
+            work.cancel()
+        }
+        defer { limit.cancel() }
+        return try await work.value
     }
 }

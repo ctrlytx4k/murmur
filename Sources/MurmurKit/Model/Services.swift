@@ -120,6 +120,12 @@ public protocol TextCleanupService: AnyObject {
     func clean(_ text: String, instructions: String) async throws -> String
 }
 
+/// A language model on this Mac that answers a prompt. Used for meeting summaries.
+public protocol LocalTextModel: AnyObject {
+    var availability: CleanupAvailability { get }
+    func generate(system: String, user: String) async throws -> String
+}
+
 /// Guards against a language model that replies to the transcript instead of rewriting it.
 public nonisolated enum CleanupCheck {
     /// Strips the wrappers a model sometimes adds around its reply.

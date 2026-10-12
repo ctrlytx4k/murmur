@@ -271,6 +271,13 @@ public final class ProviderStore {
         selectedID = id
     }
 
+    /// The user said yes on the consent sheet for something other than choosing the cleanup provider,
+    /// such as one meeting summary. The host is remembered; the cleanup choice does not change.
+    public func grantConsent(for provider: ProviderConfig) {
+        guard let host = provider.host, !consentedHosts.contains(host) else { return }
+        consentedHosts.append(host)
+    }
+
     /// Adds or replaces a provider. A blank key keeps the one already saved.
     public func save(_ provider: ProviderConfig, key: String?) {
         guard provider.kind != .appleIntelligence else { return }
@@ -311,7 +318,7 @@ public nonisolated enum ProviderAPI {
         return url
     }
 
-    private static func request(_ provider: ProviderConfig, path: String, key: String?, body: [String: Any]? = nil) throws -> URLRequest {
+    private static func request(_ provider: ProviderConfig, path: String, key: String?, body: [String: Any]? = nil, timeout: TimeInterval = ProviderAPI.timeout) throws -> URLRequest {
         var request = URLRequest(url: try endpoint(provider, path), timeoutInterval: timeout)
         request.httpMethod = body == nil ? "GET" : "POST"
         if let key, !key.isEmpty {
@@ -332,23 +339,27 @@ public nonisolated enum ProviderAPI {
         max(256, text.utf8.count * 2 / 3) + (reasons ? 2048 : 0)
     }
 
-    public static func chatRequest(_ provider: ProviderConfig, key: String?, system: String, user: String) throws -> URLRequest {
+    /// `maxOutput` and `timeout` are for work that is not a quick clean-up, such as a meeting summary.
+    public static func chatRequest(
+        _ provider: ProviderConfig, key: String?, system: String, user: String, maxOutput: Int? = nil, timeout: TimeInterval = ProviderAPI.timeout
+    ) throws -> URLRequest {
         if provider.kind == .anthropic {
             // Current Claude models refuse a temperature, so none is sent. Effort "low" keeps a clean-up quick.
             var body: [String: Any] = [
                 "model": provider.model, "system": system, "messages": [["role": "user", "content": user]],
-                "max_tokens": outputAllowance(for: user, reasons: true),
+                "max_tokens": maxOutput.map { $0 + 2048 } ?? outputAllowance(for: user, reasons: true),
             ]
             if provider.supportsEffort { body["output_config"] = ["effort": "low"] }
-            return try request(provider, path: "/v1/messages", key: key, body: body)
+            return try request(provider, path: "/v1/messages", key: key, body: body, timeout: timeout)
         }
         var body: [String: Any] = [
             "model": provider.model,
             "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
         ]
         if !provider.omitsTemperature { body["temperature"] = 0 }
-        body[provider.usesMaxCompletionTokens ? "max_completion_tokens" : "max_tokens"] = outputAllowance(for: user, reasons: provider.usesMaxCompletionTokens)
-        return try request(provider, path: "/chat/completions", key: key, body: body)
+        body[provider.usesMaxCompletionTokens ? "max_completion_tokens" : "max_tokens"] =
+            maxOutput.map { $0 + (provider.usesMaxCompletionTokens ? 2048 : 0) } ?? outputAllowance(for: user, reasons: provider.usesMaxCompletionTokens)
+        return try request(provider, path: "/chat/completions", key: key, body: body, timeout: timeout)
     }
 
     public static func modelsRequest(_ provider: ProviderConfig, key: String?) throws -> URLRequest {
@@ -486,20 +497,28 @@ public struct RemoteProvider: CleanupProvider {
         return (cleaned, config)
     }
 
+    /// A free-form answer to a prompt, for work that is not a clean-up. One request, one line in the network log.
+    func complete(system: String, user: String, purpose: String, maxOutput: Int, timeout: TimeInterval) async throws -> String {
+        let request = try ProviderAPI.chatRequest(config, key: key, system: system, user: user, maxOutput: maxOutput, timeout: timeout)
+        let (data, status) = try await send(request, purpose: purpose, timeout: timeout)
+        guard status == 200 else { throw ProviderAPI.failure(status: status, data) }
+        return try ProviderAPI.parseChat(config, data)
+    }
+
     func models() async throws -> [ProviderAPI.Model] {
         let (data, status) = try await send(ProviderAPI.modelsRequest(config, key: key), purpose: "Model list")
         guard status == 200 else { throw ProviderError.http(status) }
         return try ProviderAPI.parseModels(config, data)
     }
 
-    private func send(_ request: URLRequest, purpose: String) async throws -> (Data, Int) {
+    private func send(_ request: URLRequest, purpose: String, timeout: TimeInterval = ProviderAPI.timeout) async throws -> (Data, Int) {
         let sent = request.httpBody?.count ?? 0
         do {
             // The whole exchange gets 8 seconds, however the server paces its reply.
             let (data, response) = try await withThrowingTaskGroup(of: (Data, HTTPURLResponse).self) { group in
                 group.addTask { try await transport.send(request) }
                 group.addTask {
-                    try await Task.sleep(for: .seconds(ProviderAPI.timeout))
+                    try await Task.sleep(for: .seconds(timeout))
                     throw ProviderError.timeout
                 }
                 defer { group.cancelAll() }
