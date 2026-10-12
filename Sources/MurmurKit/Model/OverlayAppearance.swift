@@ -155,8 +155,9 @@ public nonisolated struct OverlayAppearance: Codable, Equatable, Sendable {
     public var fillOpacity: Double {
         let amount = clamped.seeThrough
         switch material {
-        case .glass, .tinted: return 0.6 * amount
-        case .frosted: return 0.75 + 0.17 * amount
+        // Wide ranges, so the slider is plain to see: glass goes from none to mostly frosted, frosted from half to nearly solid.
+        case .glass, .tinted: return 0.7 * amount
+        case .frosted: return 0.5 + 0.45 * amount
         case .solid: return 1
         }
     }

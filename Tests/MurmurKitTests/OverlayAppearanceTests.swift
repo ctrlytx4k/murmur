@@ -106,11 +106,19 @@ import Testing
         overlay.seeThrough = 0
         #expect(overlay.fillOpacity == 0)
         overlay.seeThrough = 1
-        #expect(abs(overlay.fillOpacity - 0.6) < 0.0001)
+        #expect(abs(overlay.fillOpacity - 0.7) < 0.0001)
         overlay.material = .frosted
-        #expect(abs(overlay.fillOpacity - 0.92) < 0.0001)
+        #expect(abs(overlay.fillOpacity - 0.95) < 0.0001)
         overlay.seeThrough = 0
-        #expect(abs(overlay.fillOpacity - 0.75) < 0.0001)
+        #expect(abs(overlay.fillOpacity - 0.5) < 0.0001)
+        // Frosted is always frostier than Glass at the same setting.
+        for amount in [0.0, 0.35, 1.0] {
+            var glass = OverlayAppearance(), frosted = OverlayAppearance()
+            glass.seeThrough = amount
+            frosted.seeThrough = amount
+            frosted.material = .frosted
+            #expect(frosted.fillOpacity > glass.fillOpacity)
+        }
         overlay.material = .solid
         #expect(overlay.fillOpacity == 1)
     }

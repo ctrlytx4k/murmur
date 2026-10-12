@@ -100,6 +100,9 @@ struct MurmurSlider: View {
     var width: CGFloat = 200
     let valueText: String
     @Environment(\.isEnabled) private var isEnabled
+    @FocusState private var focused: Bool
+    /// A click also gives it focus. The ring is for people steering with the keyboard, so a drag hides it.
+    @State private var dragged = false
 
     private var span: Double { range.upperBound - range.lowerBound }
 
@@ -113,18 +116,24 @@ struct MurmurSlider: View {
                 Circle().fill(LinearGradient(colors: [.white, Color(red: 0.93, green: 0.94, blue: 0.96)], startPoint: .top, endPoint: .bottom))
                     .frame(width: thumb, height: thumb)
                     .shadow(color: .black.opacity(0.3), radius: 1.5, y: 1)
+                    .overlay { if focused, !dragged { Circle().strokeBorder(Tokens.accentText, lineWidth: 2) } }
                     .offset(x: x)
             }
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
+                dragged = true
                 set(range.lowerBound + span * Double(min(max((drag.location.x - thumb / 2) / (geo.size.width - thumb), 0), 1)))
             })
         }
         .frame(width: width, height: 20)
         .focusable(isEnabled)
-        .onKeyPress(.leftArrow) { set(value - max(step, span / 20)); return .handled }
-        .onKeyPress(.rightArrow) { set(value + max(step, span / 20)); return .handled }
+        .focused($focused)
+        // The system's rectangle is replaced by a ring on the thumb.
+        .focusEffectDisabled()
+        .onChange(of: focused) { _, isFocused in if !isFocused { dragged = false } }
+        .onKeyPress(.leftArrow) { dragged = false; set(value - max(step, span / 20)); return .handled }
+        .onKeyPress(.rightArrow) { dragged = false; set(value + max(step, span / 20)); return .handled }
         .accessibilityRepresentation {
             Slider(value: $value, in: range, step: step) { Text(label) }.accessibilityValue(valueText)
         }

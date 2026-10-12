@@ -67,23 +67,23 @@ struct OverlayMaterial<S: InsettableShape>: ViewModifier {
                     .overlay(shape.strokeBorder(Tokens.stroke, lineWidth: 0.5))
                     .shadow(color: .black.opacity(0.12), radius: 10, y: 6)
             } else {
-                let filled = content.background {
-                    // The fill sits on the glass: the more of it, the less of the desktop comes through.
+                // Three layers, back to front: the glass, the fill, the card's content. The fill is its own layer on
+                // top of the glass, so the See-through slider always shows: the more fill, the less desktop comes through.
+                content.background {
+                    if flatGlass {
+                        // Offscreen there is no blur. A thin veil stands in for the glass.
+                        shape.fill(Tokens.glassOpaque.opacity(0.5))
+                        shape.strokeBorder(Tokens.stroke, lineWidth: 0.5)
+                    } else if material == .tinted {
+                        Color.clear.glassEffect(.regular.tint(Tokens.accent.opacity(0.2)), in: shape)
+                    } else {
+                        Color.clear.glassEffect(.regular, in: shape)
+                    }
                     shape.fill((material == .frosted ? Tokens.windowBackground : Tokens.glassOpaque).opacity(appearance.fillOpacity))
                     if material == .tinted {
                         shape.fill(Tokens.accent.opacity(0.12))
                         shape.strokeBorder(Tokens.accentSoft, lineWidth: 1)
                     }
-                }
-                if flatGlass {
-                    // Offscreen there is no blur. A thin veil stands in for the glass so the fill still reads.
-                    filled
-                        .background(Tokens.glassOpaque.opacity(0.5), in: shape)
-                        .overlay(shape.strokeBorder(Tokens.stroke, lineWidth: 0.5))
-                } else if material == .tinted {
-                    filled.glassEffect(.regular.tint(Tokens.accent.opacity(0.2)), in: shape)
-                } else {
-                    filled.glassEffect(.regular, in: shape)
                 }
             }
         }

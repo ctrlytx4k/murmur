@@ -119,6 +119,15 @@ enum Snapshots {
                 add("overlay-material-\(material.rawValue)-on-\(backdrop.rawValue)", OverlayPreviewStage(stores: st, backdrop: backdrop).frame(width: 598))
             }
         }
+        // The two ends of the See-through slider, for Glass and for Frosted.
+        for material in [OverlayAppearance.Material.glass, .frosted] {
+            for amount in [0.0, 1.0] {
+                st = make(recording)
+                st.settings.overlay.material = material
+                st.settings.overlay.seeThrough = amount
+                add("overlay-see-through-\(material.rawValue)-\(Int(amount * 100))", OverlayPreviewStage(stores: st, backdrop: .busy).frame(width: 598))
+            }
+        }
         for size in OverlayAppearance.Size.allCases {
             st = make(recording)
             st.settings.overlay.size = size
