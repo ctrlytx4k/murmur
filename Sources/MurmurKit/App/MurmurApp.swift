@@ -81,7 +81,9 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         let catalog: ModelCatalog
         let meetings: MeetingStore
         let meeting: MeetingController
+        let summaryModel: any LocalTextModel
         if demo {
+            summaryModel = DemoCleanup()
             meetings = MeetingStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("murmur-demo-meetings-\(UUID().uuidString)"))
             // Simulated services: nothing is recorded and nothing is typed.
             controller = DictationController(
@@ -97,9 +99,11 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             let audio = LiveAudioCapture()
             let insertion = PasteInsertion(settings: settings)
             self.insertion = insertion
+            let apple = AppleCleanup()
+            summaryModel = apple
             controller = DictationController(
                 audio: audio, engine: router, insertion: insertion, permissions: LivePermissionsService(),
-                settings: settings, cleanup: AppleCleanup(), history: history, stats: stats,
+                settings: settings, cleanup: apple, history: history, stats: stats,
                 providers: providers, providerTransport: URLSessionProviderTransport(), network: network, dictionary: dictionary)
             audio.onDeviceChange = { [weak self] message in self?.controller.noteDeviceChange(message) }
             catalog = ModelCatalog(parakeetStatus: router.parakeet.isInstalled ? .installed : .available)
@@ -116,7 +120,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         }
         stores = Stores(
             controller: controller, settings: settings, dictionary: dictionary, history: history, stats: stats, providers: providers,
-            network: network, catalog: catalog, meetings: meetings, meeting: meeting, isDemo: demo)
+            network: network, catalog: catalog, meetings: meetings, meeting: meeting, summaryModel: summaryModel, isDemo: demo)
         router?.apple.onAssetDownload = { [weak self] in
             guard let self, self.settings.logsNetworkActivity else { return }
             self.stores.network.record(host: "Apple (via macOS)", reason: "Speech language download", bytes: 0)

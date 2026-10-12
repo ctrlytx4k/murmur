@@ -99,7 +99,12 @@ nonisolated struct DemoMeetingTrack: MeetingTrack {
 }
 
 /// Drops filler words and tidies casing, so Cleaned up mode has something to show in the demo.
-final class DemoCleanup: TextCleanupService {
+final class DemoCleanup: TextCleanupService, LocalTextModel {
+    func generate(system: String, user: String) async throws -> String {
+        try await Task.sleep(for: .milliseconds(600))
+        return DemoData.summaryText
+    }
+
     let availability = CleanupAvailability.available(model: "demo-cleanup")
     func clean(_ text: String, instructions: String) async throws -> String {
         try await Task.sleep(for: .milliseconds(400))
@@ -116,6 +121,16 @@ final class DemoCleanup: TextCleanupService {
 
 /// The sample content from the mockups, used only with `--demo` and for snapshots.
 enum DemoData {
+    static let summaryText = """
+    Key points
+    - The language step in onboarding works well.
+    - The engine step feels heavy for first-time users.
+    - The engine will be picked automatically, with the choice kept in Settings.
+
+    Action items
+    - Priya: update the onboarding flow, by Thursday
+    """
+
     /// The meetings on the Meetings board.
     static func meetings(now: Date = Date()) -> [Meeting] {
         let calendar = Calendar.current

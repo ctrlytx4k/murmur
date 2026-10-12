@@ -607,6 +607,8 @@ private struct ModelList: View {
 /// Sheet D: asked the first time text would go to a host. Declining changes nothing.
 struct ProviderConsentSheet: View {
     let provider: ProviderConfig
+    /// Asked from a meeting's Summarize button rather than from AI Cleanup.
+    var forMeeting = false
     var onDecline: () -> Void = {}
     var onAccept: () -> Void = {}
 
@@ -616,11 +618,15 @@ struct ProviderConsentSheet: View {
         SheetFrame {
             Image(systemName: "cloud").font(.system(size: 18, weight: .medium)).foregroundStyle(Tokens.warning)
                 .frame(width: 40, height: 40).background(Tokens.warningSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            Text("Send cleanup text to \(who)?").font(.system(size: 17, weight: .bold)).padding(.top, 6)
+            Text(forMeeting ? "Send this transcript to \(who)?" : "Send cleanup text to \(who)?").font(.system(size: 17, weight: .bold)).padding(.top, 6)
             Text("Shown once, the first time you pick a provider at this address.").font(.system(size: 12.5)).foregroundStyle(Tokens.labelSecondary)
         } content: {
             point("checkmark", Tokens.success, Tokens.successSoft, "Audio stays on this Mac.", "Transcription still runs here.")
-            point("arrow.up.right", Tokens.warning, Tokens.warningSoft, "The text of each take", "using Cleaned up, plus the preset’s instructions, goes to \(who).")
+            if forMeeting {
+                point("arrow.up.right", Tokens.warning, Tokens.warningSoft, "The whole transcript", "of this meeting goes to \(who), now and each time you summarize with it.")
+            } else {
+                point("arrow.up.right", Tokens.warning, Tokens.warningSoft, "The text of each take", "using Cleaned up, plus the preset’s instructions, goes to \(who).")
+            }
             point("list.bullet", Tokens.accentText, Tokens.accentSoft, "Every request is logged", "in Privacy › Network log. Offline mode sends nothing.")
             HStack(alignment: .top, spacing: 12) {
                 icon("info", Tokens.labelSecondary, Tokens.controlStrong)
@@ -634,7 +640,7 @@ struct ProviderConsentSheet: View {
             }
         } footer: {
             Button("Keep It on This Mac", action: onDecline).buttonStyle(MurmurButtonStyle(height: 32)).keyboardShortcut(.cancelAction)
-            Button("Use \(provider.name)", action: onAccept).buttonStyle(MurmurButtonStyle(kind: .primary, height: 32))
+            Button(forMeeting ? "Send and Summarize" : "Use \(provider.name)", action: onAccept).buttonStyle(MurmurButtonStyle(kind: .primary, height: 32))
         }
         .accessibilityAddTraits(.isModal)
     }

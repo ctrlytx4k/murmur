@@ -12,7 +12,15 @@ struct MeetingsView: View {
     @State private var confirmingDelete = false
     @State private var confirmingDiscard = false
     @State private var copied = false
+    /// A meeting opens on its raw transcript. The summary is the second tab.
+    @State var tab = DetailTab.transcript
+    @State private var summaryProvider: String?
+    @State private var consenting: ProviderConfig?
+    @State private var confirmingDeleteSummary = false
 
+    enum DetailTab: Hashable { case transcript, summary }
+
+    private var summarizer: MeetingSummarizer { stores.summarizer }
     private var store: MeetingStore { stores.meetings }
     private var controller: MeetingController { stores.meeting }
     private var settings: SettingsStore { stores.settings }
@@ -38,6 +46,19 @@ struct MeetingsView: View {
         .onAppear { controller.refreshPermissions() }
         // A meeting that just stopped opens on its transcript.
         .onChange(of: controller.latest) { _, latest in if let latest { selection = latest } }
+        .onChange(of: selection) { _, _ in
+            tab = .transcript
+            summarizer.dismissFailure()
+        }
+        // A summary that has just been made is shown.
+        .onChange(of: selected?.summary) { old, new in if new != nil, new != old { tab = .summary } }
+        .sheet(item: $consenting) { provider in
+            ProviderConsentSheet(provider: provider, forMeeting: true, onDecline: { consenting = nil }) {
+                consenting = nil
+                summarizer.grantConsent(provider)
+                if let id = selected?.id { summarizer.summarize(id, with: provider) }
+            }
+        }
     }
 
     // MARK: list
@@ -273,9 +294,9 @@ struct MeetingsView: View {
                     Text(meta(meeting)).font(.mmCallout).foregroundStyle(Tokens.labelTertiary)
                 }
                 Spacer()
-                if meeting.isTranscribed, !meeting.lines.isEmpty {
+                if meeting.isTranscribed, !meeting.lines.isEmpty, tab == .transcript || meeting.summary != nil {
                     Button {
-                        DictationController.systemCopy(meeting.text { Self.clock(meeting, $0) })
+                        DictationController.systemCopy(tab == .summary ? (meeting.summary?.text ?? "") : meeting.text { Self.clock(meeting, $0) })
                         copied = true
                         Task {
                             try? await Task.sleep(for: .seconds(1.5))
@@ -299,7 +320,20 @@ struct MeetingsView: View {
                 .padding(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
                 .background(Tokens.warningSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
-            if meeting.isTranscribed {
+            if meeting.isTranscribed, !meeting.lines.isEmpty {
+                RectSegments(options: [(DetailTab.transcript, "Transcript"), (DetailTab.summary, "Summary")], selection: $tab, label: "Show")
+                if tab == .summary, let summary = meeting.summary {
+                    summaryView(meeting, summary)
+                } else {
+                    if meeting.summary == nil { summarizeCard(meeting) }
+                    if tab == .transcript {
+                        transcript(meeting)
+                    } else {
+                        Text("No summary yet. The raw transcript is on the Transcript tab.").font(.mmBody).foregroundStyle(Tokens.labelTertiary)
+                        Spacer(minLength: 0)
+                    }
+                }
+            } else if meeting.isTranscribed {
                 transcript(meeting)
             } else {
                 waiting(meeting)
@@ -352,6 +386,148 @@ struct MeetingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Tokens.elevated, in: shape)
             .overlay(shape.strokeBorder(Tokens.stroke, lineWidth: 0.5))
+        }
+    }
+
+    // MARK: summary
+
+    private func chosenProvider() -> ProviderConfig {
+        let choices = summarizer.choices
+        return choices.first { $0.id == summaryProvider } ?? choices.first { $0.id == summarizer.preselected.id } ?? .apple
+    }
+
+    private func providerLabel(_ provider: ProviderConfig) -> String {
+        provider.kind == .localServer && !provider.model.isEmpty ? "\(provider.name) · \(provider.model)" : provider.name
+    }
+
+    /// "Summarize with": every configured provider, the ones on this Mac first, each saying where the transcript goes.
+    private var providerPopUp: some View {
+        let choices = summarizer.choices
+        let cleanupChoice = summarizer.preselected.id
+        var details: [String: String] = [:], badges: [String: AnyView] = [:]
+        var disabled: Set<String> = []
+        for provider in choices {
+            let mine = provider.id == cleanupChoice ? "Your AI Cleanup choice" : nil
+            if let reason = summarizer.unavailableReason(provider) {
+                details[provider.id] = reason
+                disabled.insert(provider.id)
+            } else if provider.isCloud {
+                details[provider.id] = "Sends the whole transcript to \(provider.recipient)"
+            } else if provider.kind == .appleIntelligence {
+                details[provider.id] = mine ?? "Built into macOS"
+            } else {
+                details[provider.id] = [provider.hostLabel, mine].compactMap { $0 }.joined(separator: " · ")
+            }
+            badges[provider.id] = AnyView(PlaceBadge(isLocal: provider.isLocal, cloudText: "Cloud"))
+        }
+        return GlassPopUpButton(
+            label: "Summarize with", options: choices.map { ($0.id, providerLabel($0)) },
+            selection: Binding(get: { chosenProvider().id }, set: { summaryProvider = $0 }),
+            details: details, header: "Summarize with", disabled: disabled, accessories: badges)
+    }
+
+    private func startSummary(_ meeting: Meeting) {
+        let provider = chosenProvider()
+        if summarizer.needsConsent(provider) { consenting = provider } else { summarizer.summarize(meeting.id, with: provider) }
+    }
+
+    /// Progress while a summary is being made, or why the last attempt failed.
+    @ViewBuilder private func summaryStatus(_ meeting: Meeting) -> some View {
+        switch summarizer.state {
+        case .working(let id, let step, let total) where id == meeting.id:
+            HStack(spacing: 10) {
+                Spinner(size: 12)
+                Text(total > 1 ? (step == total - 1 ? "Combining the parts…" : "Summarizing part \(step + 1) of \(total - 1)…") : "Summarizing…")
+                    .font(.mmBodyEmphasis)
+                if total > 1 { ProgressBar(value: Double(step) / Double(total), height: 4).frame(width: 120) }
+                Spacer(minLength: 0)
+                Button("Cancel") { summarizer.cancel() }.buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5))
+            }
+        case .failed(let id, let message) where id == meeting.id:
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle").font(.system(size: 12, weight: .medium))
+                Text("No summary was made: \(message)").font(.mmCallout).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(Tokens.warning)
+        default: EmptyView()
+        }
+    }
+
+    /// Nothing is summarized until Summarize is pressed.
+    private func summarizeCard(_ meeting: Meeting) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        return VStack(alignment: .leading, spacing: 10) {
+            if summarizer.isWorking(on: meeting.id) {
+                summaryStatus(meeting)
+            } else {
+                HStack(spacing: 12) {
+                    Image(systemName: "text.badge.checkmark").font(.system(size: 13, weight: .medium)).foregroundStyle(Tokens.accentText)
+                        .frame(width: 30, height: 30).background(Tokens.accentSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Summarize this meeting?").font(.mmBodyEmphasis)
+                        Text("Key points and action items. Nothing happens until you choose.").font(.mmSub).foregroundStyle(Tokens.labelTertiary)
+                    }
+                    Spacer(minLength: 8)
+                    providerPopUp
+                    Button("Summarize") { startSummary(meeting) }
+                        .buttonStyle(MurmurButtonStyle(kind: .primary, height: 30, fontSize: 12.5))
+                        .disabled(summarizer.unavailableReason(chosenProvider()) != nil)
+                }
+                summaryStatus(meeting)
+            }
+        }
+        .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Tokens.elevated, in: shape)
+        .overlay(shape.strokeBorder(Tokens.stroke, lineWidth: 0.5))
+    }
+
+    private func summaryView(_ meeting: Meeting, _ summary: MeetingSummary) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(summary.byline).font(.system(size: 12, weight: .semibold)).foregroundStyle(Tokens.labelSecondary)
+                if !summary.isLocal { PlaceBadge(isLocal: false, cloudText: "Cloud") }
+                Spacer(minLength: 8)
+                providerPopUp
+                Button("Regenerate") { startSummary(meeting) }
+                    .buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5))
+                    .disabled(summarizer.isWorking(on: meeting.id) || summarizer.unavailableReason(chosenProvider()) != nil)
+                Button("Delete summary") { confirmingDeleteSummary = true }.buttonStyle(MurmurButtonStyle(kind: .danger, height: 28, fontSize: 12.5))
+            }
+            summaryStatus(meeting)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 7) {
+                    ForEach(Array(summary.text.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, line in
+                        let text = line.trimmingCharacters(in: .whitespaces)
+                        if text.hasPrefix("- ") || text.hasPrefix("• ") {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text("•").foregroundStyle(Tokens.labelTertiary)
+                                Text(String(text.dropFirst(2))).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .font(.system(size: 15)).lineSpacing(4)
+                        } else if text.isEmpty {
+                            Color.clear.frame(height: 6)
+                        } else {
+                            Text(text).font(.system(size: 15, weight: .semibold)).textSelection(.enabled)
+                        }
+                    }
+                }
+                .padding(EdgeInsets(top: 16, leading: 18, bottom: 16, trailing: 18))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Tokens.elevated, in: shape)
+            .overlay(shape.strokeBorder(Tokens.stroke, lineWidth: 0.5))
+        }
+        .confirmationDialog("Delete this summary?", isPresented: $confirmingDeleteSummary) {
+            Button("Delete Summary", role: .destructive) {
+                summarizer.deleteSummary(meeting.id)
+                tab = .transcript
+            }
+        } message: {
+            Text("Only the summary is deleted. The transcript stays exactly as it is.")
         }
     }
 

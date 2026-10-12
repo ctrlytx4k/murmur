@@ -40,7 +40,7 @@ enum Snapshots {
                 openTrack: { _ in DemoMeetingTrack() })
             let stores = Stores(
                 controller: controller, settings: settings, dictionary: DictionaryStore(defaults: defaults), history: history, stats: StatsStore(defaults: defaults), providers: providers,
-                network: NetworkLog(defaults: defaults), catalog: ModelCatalog(parakeetStatus: .available), meetings: meetings, meeting: meeting, isDemo: !empty)
+                network: NetworkLog(defaults: defaults), catalog: ModelCatalog(parakeetStatus: .available), meetings: meetings, meeting: meeting, summaryModel: DemoCleanup(), isDemo: !empty)
             if !empty {
                 DemoData.seed(stores)
                 // The day the Stats board was drawn on, so the numbers can be checked against it.
@@ -211,6 +211,14 @@ enum Snapshots {
             phase: .chooseModel))
         add("sheet-provider-setup-empty", ProviderSetupSheet(stores: st, provider: ProviderConfig(kind: .openAICompatible), isNew: true))
         add("sheet-provider-consent", ProviderConsentSheet(provider: claude))
+        do {
+            let summarized = withProviders(.idle)
+            if let id = summarized.meetings.meetings.first?.id {
+                summarized.meetings.setSummary(id, MeetingSummary(text: DemoData.summaryText, provider: "Apple Intelligence", isLocal: true, date: Date()))
+                add("meetings-summary", MainWindowMeeting(stores: summarized, selection: id, tab: .summary))
+            }
+            add("sheet-provider-consent-meeting", ProviderConsentSheet(provider: claude, forMeeting: true))
+        }
         add("overlay-cloud-listening", OverlayView(stores: withProviders(recording)))
         add("overlay-cloud-processing", OverlayView(stores: withProviders(.processing)))
         add("overlay-stay-local", OverlayView(stores: withProviders(recording, stayLocal: true)))
@@ -267,11 +275,12 @@ enum Snapshots {
     private struct MainWindowMeeting: View {
         let stores: Stores
         let selection: UUID?
+        var tab = MeetingsView.DetailTab.transcript
         var body: some View {
             VStack(spacing: 0) {
                 RectSegments(options: [(MainTab.overview, "Overview"), (MainTab.history, "History"), (MainTab.meetings, "Meetings")], selection: .constant(.meetings), label: "View")
                     .frame(height: 52)
-                MeetingsView(stores: stores, selection: selection)
+                MeetingsView(stores: stores, selection: selection, tab: tab)
             }
             .frame(width: 1144, height: 800)
             .background(Tokens.windowBackground)

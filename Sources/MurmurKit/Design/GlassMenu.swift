@@ -478,6 +478,8 @@ struct GlassPopUpButton<Value: Hashable>: View {
     var disabled: Set<Value> = []
     /// A live view on the chosen row, such as a level meter.
     var selectedAccessory: AnyView?
+    /// A small view at the trailing edge of some or all choices, such as an "On this Mac" badge.
+    var accessories: [Value: AnyView] = [:]
     var maxHeight: CGFloat = 420
 
     var body: some View {
@@ -494,7 +496,7 @@ struct GlassPopUpButton<Value: Hashable>: View {
         items += options.map { option in
             GlassMenuItem(
                 title: option.label, detail: details[option.value], isSelected: option.value == selection,
-                isDisabled: disabled.contains(option.value), accessory: option.value == selection ? selectedAccessory : nil
+                isDisabled: disabled.contains(option.value), accessory: accessories[option.value] ?? (option.value == selection ? selectedAccessory : nil)
             ) { selection = option.value }
         }
         if !footer.isEmpty { items += [.separator] + footer }

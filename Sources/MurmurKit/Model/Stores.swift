@@ -13,11 +13,12 @@ public final class Stores {
     public let catalog: ModelCatalog
     public let meetings: MeetingStore
     public let meeting: MeetingController
+    public let summarizer: MeetingSummarizer
     /// True with `--demo`: simulated services and sample data.
     public let isDemo: Bool
     let overlay = OverlayPanelState()
 
-    public init(controller: DictationController, settings: SettingsStore, dictionary: DictionaryStore, history: HistoryStore, stats: StatsStore, providers: ProviderStore, network: NetworkLog, catalog: ModelCatalog, meetings: MeetingStore, meeting: MeetingController, isDemo: Bool) {
+    public init(controller: DictationController, settings: SettingsStore, dictionary: DictionaryStore, history: HistoryStore, stats: StatsStore, providers: ProviderStore, network: NetworkLog, catalog: ModelCatalog, meetings: MeetingStore, meeting: MeetingController, summaryModel: (any LocalTextModel)?, isDemo: Bool) {
         self.controller = controller
         self.settings = settings
         self.dictionary = dictionary
@@ -28,6 +29,7 @@ public final class Stores {
         self.catalog = catalog
         self.meetings = meetings
         self.meeting = meeting
+        self.summarizer = MeetingSummarizer(store: meetings, providers: providers, settings: settings, router: controller.cleanupRouter, local: summaryModel)
         self.isDemo = isDemo
     }
 }

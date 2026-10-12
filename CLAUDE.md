@@ -53,7 +53,7 @@ Not in MVP: command mode, automatic updates, Windows. Don't build these until P0
 Built in steps, each usable on its own:
 1. Record and transcribe: Meetings tab, Start and Stop, microphone plus call audio, raw transcript. Done.
 2. Speakers: tell the people on the call apart, with renaming.
-3. Summaries, only on request: a "Summarize with" pop-up listing every provider (local first), cloud behind the existing consent, Regenerate and Delete summary, long meetings in chunks.
+3. Summaries, only on request: a "Summarize with" pop-up listing every provider (local first), cloud behind the existing consent, Regenerate and Delete summary, long meetings in chunks. Done.
 4. "A call started, record it?", pause, the tell-people reminder, export, a Meetings settings pane. The recording pill itself (top center, draggable, left out of screen shares) is done.
 
 ## Design

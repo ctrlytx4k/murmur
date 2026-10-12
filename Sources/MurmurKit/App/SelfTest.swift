@@ -77,6 +77,19 @@ enum SelfTest {
                 for line in result.lines {
                     print("  \(String(format: "%5.1f", line.start)) \(line.speaker?.label ?? "-"): \(line.text)")
                 }
+                // The same prompt a real summary uses, with the model built into macOS.
+                let apple = AppleCleanup()
+                print("summary model: \(apple.availability)")
+                if apple.availability.isAvailable, !result.lines.isEmpty {
+                    let began = Date()
+                    let transcript = result.lines.map { "\($0.speaker.map { "\($0.label): " } ?? "")\($0.text)" }.joined(separator: "\n")
+                    do {
+                        let summary = try await apple.generate(system: SummaryPrompt.whole, user: SummaryPrompt.user(transcript))
+                        print("summary in \(String(format: "%.1f", Date().timeIntervalSince(began))) s:\n\(summary)")
+                    } catch {
+                        print("summary FAILED \(error)")
+                    }
+                }
                 exit(0)
             } catch {
                 print("meetingtest failed: \(error)")

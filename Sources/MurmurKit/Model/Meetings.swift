@@ -40,6 +40,8 @@ public nonisolated struct Meeting: Codable, Equatable, Identifiable, Sendable {
     /// Why it is not transcribed yet, after a failed attempt.
     public var problem: String?
     public var hasAudio = true
+    /// Made only when the user asks for one. Lives beside the transcript and can be deleted on its own.
+    public var summary: MeetingSummary?
 
     public init(id: UUID = UUID(), title: String, date: Date, duration: TimeInterval, includesCallAudio: Bool) {
         self.id = id
@@ -118,6 +120,11 @@ public final class MeetingStore {
         var stored = false
         update(id) { stored = $0.setTranscript(lines, engine: engine, note: note) }
         return stored
+    }
+
+    /// Stores, replaces or (with nil) removes the summary. The transcript is not involved.
+    public func setSummary(_ id: UUID, _ summary: MeetingSummary?) {
+        update(id) { $0.summary = summary }
     }
 
     public func markFailed(_ id: UUID, problem: String) {
