@@ -14,12 +14,62 @@ public nonisolated struct MeetingLine: Codable, Equatable, Identifiable, Sendabl
     /// Seconds from the start of the recording.
     public var start: Double
     public var speaker: MeetingSpeaker?
+    /// Which of the people on the call said it, numbered from 1 in the order they first spoke.
+    /// Nil when the voices were not told apart.
+    public var voice: Int?
     public var text: String
 
-    public init(start: Double, speaker: MeetingSpeaker?, text: String) {
+    public init(start: Double, speaker: MeetingSpeaker?, voice: Int? = nil, text: String) {
         self.start = start
         self.speaker = speaker
+        self.voice = voice
         self.text = text
+    }
+}
+
+/// A stretch of the call track in which one person speaks.
+public nonisolated struct SpeakerTurn: Equatable, Sendable {
+    public var start: Double
+    public var end: Double
+    public var voice: Int
+
+    public init(start: Double, end: Double, voice: Int) {
+        self.start = start
+        self.end = end
+        self.voice = voice
+    }
+}
+
+/// Tells the people on the call apart by voice. Needs a small model that is downloaded once.
+public protocol SpeakerSeparator: AnyObject {
+    var isInstalled: Bool { get }
+    func turns(in track: URL) async throws -> [SpeakerTurn]
+}
+
+public nonisolated enum SpeakerTurns {
+    /// Turns ready to transcribe: neighbours by the same voice joined, scraps dropped, long ones cut,
+    /// and the voices numbered from 1 in the order they first speak.
+    public static func pieces(_ turns: [SpeakerTurn]) -> [SpeakerTurn] {
+        var joined: [SpeakerTurn] = []
+        for turn in turns.sorted(by: { $0.start < $1.start }) where turn.end > turn.start {
+            if let last = joined.last, last.voice == turn.voice, turn.start - last.end <= SpeechSegmenter.joinGap {
+                joined[joined.count - 1].end = max(last.end, turn.end)
+            } else {
+                joined.append(turn)
+            }
+        }
+        var numbers: [Int: Int] = [:]
+        var pieces: [SpeakerTurn] = []
+        for turn in joined where turn.end - turn.start >= 0.2 {
+            let voice = numbers[turn.voice] ?? numbers.count + 1
+            numbers[turn.voice] = voice
+            let parts = max(1, Int(((turn.end - turn.start) / SpeechSegmenter.longest).rounded(.up)))
+            let length = (turn.end - turn.start) / Double(parts)
+            for part in 0..<parts {
+                pieces.append(SpeakerTurn(start: turn.start + Double(part) * length, end: turn.start + Double(part + 1) * length, voice: voice))
+            }
+        }
+        return pieces
     }
 }
 
@@ -42,6 +92,8 @@ public nonisolated struct Meeting: Codable, Equatable, Identifiable, Sendable {
     public var hasAudio = true
     /// Made only when the user asks for one. Lives beside the transcript and can be deleted on its own.
     public var summary: MeetingSummary?
+    /// Names the user gave the voices on the call, by voice number. Labels only: the transcript's words never change.
+    public var speakerNames: [String: String]?
 
     public init(id: UUID = UUID(), title: String, date: Date, duration: TimeInterval, includesCallAudio: Bool) {
         self.id = id
@@ -63,9 +115,19 @@ public nonisolated struct Meeting: Codable, Equatable, Identifiable, Sendable {
         return true
     }
 
+    /// Who a line is shown as: "You", a name the user gave, "Speaker 2", or "Others" when the voices were not told apart.
+    public func label(for line: MeetingLine) -> String? {
+        guard let speaker = line.speaker else { return nil }
+        guard speaker == .others, let voice = line.voice else { return speaker.label }
+        return speakerNames?[String(voice)] ?? "Speaker \(voice)"
+    }
+
+    /// How many different voices were heard on the call.
+    public var voiceCount: Int { Set(lines.compactMap(\.voice)).count }
+
     /// The transcript as plain text, one line per turn.
     public func text(clock: (Double) -> String) -> String {
-        lines.map { line in "\(clock(line.start)) \(line.speaker.map { "\($0.label): " } ?? "")\(line.text)" }.joined(separator: "\n")
+        lines.map { line in "\(clock(line.start)) \(label(for: line).map { "\($0): " } ?? "")\(line.text)" }.joined(separator: "\n")
     }
 }
 
@@ -120,6 +182,16 @@ public final class MeetingStore {
         var stored = false
         update(id) { stored = $0.setTranscript(lines, engine: engine, note: note) }
         return stored
+    }
+
+    /// Names one of the voices on the call. An empty name goes back to "Speaker 2".
+    public func nameSpeaker(_ id: UUID, voice: Int, _ name: String) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        update(id) { meeting in
+            var names = meeting.speakerNames ?? [:]
+            names[String(voice)] = name.isEmpty ? nil : name
+            meeting.speakerNames = names.isEmpty ? nil : names
+        }
     }
 
     /// Stores, replaces or (with nil) removes the summary. The transcript is not involved.
@@ -257,8 +329,9 @@ public enum MeetingTranscriber {
         public var note: String?
     }
 
+    /// `callTurns` are who spoke when on the call, when the voices were told apart. Without them the call is one "Others".
     public static func transcribe(
-        microphone: (any MeetingTrack)?, call: (any MeetingTrack)?, callWasSilent: Bool = false,
+        microphone: (any MeetingTrack)?, call: (any MeetingTrack)?, callWasSilent: Bool = false, callTurns: [SpeakerTurn]? = nil,
         engine: any TranscriptionEngine, onProgress: (Double) -> Void
     ) async throws -> Result {
         switch engine.readiness {
@@ -267,12 +340,17 @@ public enum MeetingTranscriber {
         case .unavailable(let reason): throw MeetingTranscriptionFailure(message: reason)
         }
         // With a call track the microphone is you and the call is everyone else. Without one, nobody is named.
-        var jobs: [(track: any MeetingTrack, speaker: MeetingSpeaker?, range: ClosedRange<Double>)] = []
+        var jobs: [(track: any MeetingTrack, speaker: MeetingSpeaker?, voice: Int?, range: ClosedRange<Double>)] = []
         if let microphone {
-            jobs += SpeechSegmenter.segments(levels: try await microphone.levels()).map { (microphone, call == nil ? nil : .you, $0) }
+            jobs += SpeechSegmenter.segments(levels: try await microphone.levels()).map { (microphone, call == nil ? nil : .you, nil, $0) }
         }
         if let call {
-            jobs += SpeechSegmenter.segments(levels: try await call.levels()).map { (call, .others, $0) }
+            let pieces = SpeakerTurns.pieces(callTurns ?? [])
+            if pieces.isEmpty {
+                jobs += SpeechSegmenter.segments(levels: try await call.levels()).map { (call, .others, nil, $0) }
+            } else {
+                jobs += pieces.map { (call, .others, $0.voice, $0.start...$0.end) }
+            }
         }
         jobs.sort { $0.range.lowerBound < $1.range.lowerBound }
 
@@ -284,7 +362,7 @@ public enum MeetingTranscriber {
             try Task.checkCancellation()
             let clip = try await job.track.clip(from: job.range.lowerBound, to: job.range.upperBound)
             let text = try await engine.transcribe(clip).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty { lines.append(MeetingLine(start: job.range.lowerBound, speaker: job.speaker, text: text)) }
+            if !text.isEmpty { lines.append(MeetingLine(start: job.range.lowerBound, speaker: job.speaker, voice: job.voice, text: text)) }
             done += job.range.upperBound - job.range.lowerBound
             onProgress(total > 0 ? done / total : 1)
         }

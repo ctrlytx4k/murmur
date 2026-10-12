@@ -142,6 +142,8 @@ public final class SettingsStore {
     public var meetingSource: MeetingSource { didSet { save(meetingSource.rawValue, "meetingSource") } }
     /// What happens to the recording once it is transcribed. The transcript is always kept.
     public var meetingAudio: MeetingAudio { didSet { save(meetingAudio.rawValue, "meetingAudio") } }
+    /// Tell the people on the call apart, once the speaker model is downloaded.
+    public var meetingSpeakers: Bool { didSet { save(meetingSpeakers, "meetingSpeakers") } }
     /// macOS does not say whether System Audio Recording is allowed, only that we asked.
     public var askedForSystemAudio: Bool { didSet { save(askedForSystemAudio, "askedForSystemAudio") } }
 
@@ -227,6 +229,7 @@ public final class SettingsStore {
         meetingSource = raw("meetingSource", .microphoneAndCall)
         meetingAudio = raw("meetingAudio", .delete)
         askedForSystemAudio = bool("askedForSystemAudio", false)
+        meetingSpeakers = bool("meetingSpeakers", true)
 
         shortcut = codable("shortcut", .rightOption)
         behavior = raw("behavior", .pushToTalk)
@@ -270,7 +273,7 @@ public final class SettingsStore {
         showInDock = fresh.showInDock; soundsEnabled = fresh.soundsEnabled; soundSet = fresh.soundSet
         overlay = OverlayAppearance(); accent = fresh.accent; appearance = fresh.appearance
         microphoneID = nil
-        meetingSource = fresh.meetingSource; meetingAudio = fresh.meetingAudio
+        meetingSource = fresh.meetingSource; meetingAudio = fresh.meetingAudio; meetingSpeakers = fresh.meetingSpeakers
         shortcut = fresh.shortcut; behavior = fresh.behavior; doubleTapToLock = fresh.doubleTapToLock
         cycleModeShortcut = fresh.cycleModeShortcut; reinsertShortcut = fresh.reinsertShortcut
         historyShortcut = fresh.historyShortcut; acceptedConflicts = []

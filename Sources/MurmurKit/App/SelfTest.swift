@@ -70,12 +70,27 @@ enum SelfTest {
                 print("microphone track: \(size / 1024) KB, \(String(format: "%.1f", Double(levels.count) * SpeechSegmenter.frame)) s, \(SpeechSegmenter.segments(levels: levels).count) stretches of speech")
                 let settings = SettingsStore(defaults: UserDefaults(suiteName: "murmur-selftest")!)
                 let router = EngineRouter(settings: settings)
+                // Tell the voices on the call apart. Downloads the speaker model (about 22 MB) the first time.
+                var turns: [SpeakerTurn]?
+                if call != nil {
+                    let separator = FluidSpeakerSeparator()
+                    let began = Date()
+                    print("speaker model: \(separator.status)")
+                    await separator.download()
+                    print("speaker model after download: \(separator.status), \(String(format: "%.1f", Date().timeIntervalSince(began))) s")
+                    if separator.isInstalled {
+                        let separating = Date()
+                        turns = try await separator.turns(in: callURL)
+                        print("speakers: \(Set((turns ?? []).map(\.voice)).count) voices in \(turns?.count ?? 0) turns, \(String(format: "%.1f", Date().timeIntervalSince(separating))) s")
+                        for turn in turns ?? [] { print("  voice \(turn.voice): \(String(format: "%.1f", turn.start)) to \(String(format: "%.1f", turn.end))") }
+                    }
+                }
                 let start = Date()
                 let result = try await MeetingTranscriber.transcribe(
-                    microphone: AudioFileTrack(url: microphoneURL), call: call == nil ? nil : AudioFileTrack(url: callURL), engine: router.apple, onProgress: { _ in })
+                    microphone: AudioFileTrack(url: microphoneURL), call: call == nil ? nil : AudioFileTrack(url: callURL), callTurns: turns, engine: router.apple, onProgress: { _ in })
                 print("transcribed in \(String(format: "%.1f", Date().timeIntervalSince(start))) s, \(result.lines.count) lines\(result.note.map { ", note: \($0)" } ?? "")")
                 for line in result.lines {
-                    print("  \(String(format: "%5.1f", line.start)) \(line.speaker?.label ?? "-"): \(line.text)")
+                    print("  \(String(format: "%5.1f", line.start)) \(line.voice.map { "Speaker \($0)" } ?? line.speaker?.label ?? "-"): \(line.text)")
                 }
                 // The same prompt a real summary uses, with the model built into macOS.
                 let apple = AppleCleanup()

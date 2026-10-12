@@ -30,6 +30,8 @@ Small services behind protocols so each can be tested alone:
 - Meetings, separate from dictation so both work during a call:
   - MeetingAudioService: records the microphone and, with the System Audio Recording permission, the call's audio (a Core Audio process tap; audio only, never the screen). Each goes to its own file, never held in memory.
   - MeetingController: its own state machine. States: idle, recording, transcribing. The Meetings tab reads this.
+  - SpeakerSeparator: who spoke when on the call track. Optional: without the model, or if it fails, the call is one "Others".
+  - MeetingSummarizer: makes a summary only when asked, through the same providers, consent and network log as AI Cleanup.
   - MeetingStore: one folder per meeting on this Mac (meeting.json plus the audio until it is deleted).
 
 ## Rules that bite
@@ -52,7 +54,7 @@ Not in MVP: command mode, automatic updates, Windows. Don't build these until P0
 ## Meetings (approved beyond the MVP)
 Built in steps, each usable on its own:
 1. Record and transcribe: Meetings tab, Start and Stop, microphone plus call audio, raw transcript. Done.
-2. Speakers: tell the people on the call apart, with renaming.
+2. Speakers: tell the people on the call apart, with renaming. Done (pyannote Community-1 through FluidAudio, about 22 MB, downloaded on request).
 3. Summaries, only on request: a "Summarize with" pop-up listing every provider (local first), cloud behind the existing consent, Regenerate and Delete summary, long meetings in chunks. Done.
 4. "A call started, record it?", pause, the tell-people reminder, export, a Meetings settings pane. The recording pill itself (top center, draggable, left out of screen shares) is done.
 

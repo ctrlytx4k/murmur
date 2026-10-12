@@ -141,11 +141,12 @@ enum DemoData {
         var review = Meeting(title: "Design review", date: at(0, 9, 30), duration: 32 * 60, includesCallAudio: true)
         review.setTranscript([
             MeetingLine(start: 60, speaker: .you, text: "Okay so um let’s start with the onboarding flow. Did everyone get a chance to look at the uh new mockups?"),
-            MeetingLine(start: 85, speaker: .others, text: "Yes. The language step is good, but the engine step feels heavy for first-time users."),
-            MeetingLine(start: 180, speaker: .others, text: "We could pick the engine automatically and only show the choice in settings."),
+            MeetingLine(start: 85, speaker: .others, voice: 1, text: "Yes. The language step is good, but the engine step feels heavy for first-time users."),
+            MeetingLine(start: 180, speaker: .others, voice: 2, text: "We could pick the engine automatically and only show the choice in settings."),
             MeetingLine(start: 840, speaker: .you, text: "Let’s do that. Priya, can you update the flow by Thursday?"),
         ], engine: "parakeet-v3")
         review.hasAudio = false
+        review.speakerNames = ["1": "Priya"]
         var oneOnOne = Meeting(title: "1:1 with Sam", date: at(0, 8, 45), duration: 18 * 60, includesCallAudio: true)
         oneOnOne.setTranscript([MeetingLine(start: 5, speaker: .you, text: "Morning. How did the release go?")], engine: "parakeet-v3")
         oneOnOne.hasAudio = false

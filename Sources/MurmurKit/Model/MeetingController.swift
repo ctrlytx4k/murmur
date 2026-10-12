@@ -24,6 +24,8 @@ public final class MeetingController {
     public private(set) var latest: UUID?
     /// Checked when the tab is shown. Never cached.
     public private(set) var microphoneAllowed: Bool
+    /// True during the first part of transcribing a call, while the voices on it are being told apart.
+    public private(set) var isSeparatingSpeakers = false
 
     @ObservationIgnored private let audio: any MeetingAudioService
     @ObservationIgnored private let engine: any TranscriptionEngine
@@ -32,6 +34,7 @@ public final class MeetingController {
     @ObservationIgnored private let permissions: any PermissionsService
     @ObservationIgnored private let openTrack: (URL) -> any MeetingTrack
     @ObservationIgnored private let now: () -> Date
+    @ObservationIgnored private let separator: (any SpeakerSeparator)?
     @ObservationIgnored private var recordingID: UUID?
     @ObservationIgnored private var recordingCall = false
     @ObservationIgnored private var silentCalls: Set<UUID> = []
@@ -40,8 +43,10 @@ public final class MeetingController {
 
     public init(
         audio: any MeetingAudioService, engine: any TranscriptionEngine, store: MeetingStore, settings: SettingsStore,
-        permissions: any PermissionsService, openTrack: @escaping (URL) -> any MeetingTrack = { AudioFileTrack(url: $0) }, now: @escaping () -> Date = Date.init
+        permissions: any PermissionsService, separator: (any SpeakerSeparator)? = nil,
+        openTrack: @escaping (URL) -> any MeetingTrack = { AudioFileTrack(url: $0) }, now: @escaping () -> Date = Date.init
     ) {
+        self.separator = separator
         self.audio = audio
         self.engine = engine
         self.store = store
@@ -143,8 +148,20 @@ public final class MeetingController {
                 let microphone = files.fileExists(atPath: microphoneURL.path) ? self.openTrack(microphoneURL) : nil
                 let call = meeting.includesCallAudio && files.fileExists(atPath: callURL.path) ? self.openTrack(callURL) : nil
                 guard microphone != nil || call != nil else { throw MeetingTranscriptionFailure(message: "The recording’s audio is missing.") }
+                // Who spoke when on the call. Optional: without it, or if it fails, the call is one "Others".
+                var turns: [SpeakerTurn]?
+                if call != nil, !self.silentCalls.contains(id), self.settings.meetingSpeakers, let separator = self.separator, separator.isInstalled {
+                    self.isSeparatingSpeakers = true
+                    do {
+                        turns = try await separator.turns(in: callURL)
+                        DebugLog.log("meeting: \(Set((turns ?? []).map(\.voice)).count) voices on the call")
+                    } catch {
+                        DebugLog.log("meeting: could not tell the speakers apart, \(error)")
+                    }
+                    self.isSeparatingSpeakers = false
+                }
                 let result = try await MeetingTranscriber.transcribe(
-                    microphone: microphone, call: call, callWasSilent: self.silentCalls.contains(id), engine: self.engine
+                    microphone: microphone, call: call, callWasSilent: self.silentCalls.contains(id), callTurns: turns, engine: self.engine
                 ) { [weak self] progress in
                     self?.state = .transcribing(id: id, progress: progress)
                 }
@@ -157,6 +174,7 @@ public final class MeetingController {
                 self.store.markFailed(id, problem: error.localizedDescription)
                 DebugLog.log("meeting: transcription failed, \(error)")
             }
+            self.isSeparatingSpeakers = false
             self.state = .idle
         }
     }

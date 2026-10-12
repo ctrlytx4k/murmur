@@ -17,6 +17,9 @@ struct MeetingsView: View {
     @State private var summaryProvider: String?
     @State private var consenting: ProviderConfig?
     @State private var confirmingDeleteSummary = false
+    @State private var renaming: Int?
+    @State private var nameDraft = ""
+    @State private var renamingAnchor: UUID?
 
     enum DetailTab: Hashable { case transcript, summary }
 
@@ -206,6 +209,19 @@ struct MeetingsView: View {
                         }
                     }
                 }
+                if settings.meetingSource == .microphoneAndCall, let speakers = stores.speakers {
+                    SettingsRow(title: "Tell speakers apart", subtitle: speakersSubtitle(speakers), subtitleColor: speakersFailed(speakers) ? Tokens.warning : Tokens.labelTertiary) {
+                        switch speakers.status {
+                        case .installed:
+                            Toggle("Tell speakers apart", isOn: bind(settings, \.meetingSpeakers)).toggleStyle(MurmurToggleStyle())
+                        case .downloading:
+                            Spinner(size: 12)
+                            Text("Downloading…").font(.mmCallout).foregroundStyle(Tokens.labelSecondary)
+                        case .notInstalled, .failed:
+                            Button("Download · 22 MB") { Task { await speakers.download() } }.buttonStyle(MurmurButtonStyle(height: 28, fontSize: 12.5))
+                        }
+                    }
+                }
                 SettingsRow(title: "After transcribing", subtitle: "The transcript is always kept") {
                     GlassPopUpButton("After transcribing", selection: bind(settings, \.meetingAudio))
                 }
@@ -225,6 +241,19 @@ struct MeetingsView: View {
             Button("Discard", role: .destructive) { controller.discard() }
         } message: {
             Text("The audio recorded so far is deleted. Nothing is transcribed.")
+        }
+    }
+
+    private func speakersFailed(_ speakers: FluidSpeakerSeparator) -> Bool {
+        if case .failed = speakers.status { true } else { false }
+    }
+
+    private func speakersSubtitle(_ speakers: FluidSpeakerSeparator) -> String {
+        switch speakers.status {
+        case .installed: "Labels the people on the call “Speaker 1”, “Speaker 2”, and you can name them. Runs on this Mac."
+        case .downloading: "Getting the speaker model. This happens once."
+        case .notInstalled: "Needs a small speaker model, downloaded once. After that it runs on this Mac."
+        case .failed(let reason): reason
         }
     }
 
@@ -269,7 +298,8 @@ struct MeetingsView: View {
             case .transcribing(_, let progress):
                 HStack(spacing: 10) {
                     Spinner(size: 12)
-                    Text("Transcribing on this Mac · \(Int(progress * 100))%").font(.system(size: 15, weight: .semibold)).monospacedDigit()
+                    Text(controller.isSeparatingSpeakers ? "Telling the speakers apart…" : "Transcribing on this Mac · \(Int(progress * 100))%")
+                        .font(.system(size: 15, weight: .semibold)).monospacedDigit()
                 }
                 ProgressBar(value: progress)
                 Text("You can close this window. The meeting opens here when it is ready.")
@@ -362,16 +392,15 @@ struct MeetingsView: View {
     private func transcript(_ meeting: Meeting) -> some View {
         let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
         return VStack(alignment: .leading, spacing: 8) {
-            Text("Raw transcript · exactly as heard, never edited\(meeting.includesCallAudio ? " · “Others” is everyone on the call" : "")")
+            Text("Raw transcript · exactly as heard, never edited\(meeting.voiceCount > 0 ? " · speaker names are guesses until you rename them" : meeting.includesCallAudio ? " · “Others” is everyone on the call" : "")")
                 .font(.system(size: 12, weight: .semibold)).foregroundStyle(Tokens.labelSecondary)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     ForEach(meeting.lines) { line in
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text(Self.clock(meeting, line.start)).font(.mmMono).foregroundStyle(Tokens.labelTertiary).frame(width: 64, alignment: .leading)
-                            if let speaker = line.speaker {
-                                Text(speaker.label).font(.mmBodyEmphasis).foregroundStyle(speaker == .you ? Tokens.accentText : Tokens.labelSecondary)
-                                    .frame(width: 50, alignment: .leading)
+                            if let label = meeting.label(for: line) {
+                                speakerLabel(label, line: line, in: meeting)
                             }
                             Text(line.text).font(.system(size: 15)).lineSpacing(5).textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -531,6 +560,53 @@ struct MeetingsView: View {
         }
     }
 
+    /// "You" and "Others" are plain labels. A voice on the call is a button: click it to give that person a name.
+    @ViewBuilder private func speakerLabel(_ label: String, line: MeetingLine, in meeting: Meeting) -> some View {
+        let width: CGFloat = meeting.voiceCount > 0 ? 96 : 50
+        if let voice = line.voice, line.speaker == .others {
+            Button {
+                nameDraft = meeting.speakerNames?[String(voice)] ?? ""
+                renamingAnchor = line.id
+                renaming = voice
+            } label: {
+                Text(label).font(.mmBodyEmphasis).foregroundStyle(Tokens.labelSecondary).lineLimit(1).truncationMode(.tail)
+                    .frame(width: width, alignment: .leading).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Rename \(label)")
+            .accessibilityLabel("\(label). Rename")
+            .popover(isPresented: Binding(get: { renaming == voice && isFirst(line, of: voice, in: meeting) }, set: { if !$0 { renaming = nil } })) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Who is Speaker \(voice)?").font(.mmBodyEmphasis)
+                    TextField("Name", text: $nameDraft).fieldChrome().frame(width: 200)
+                        .onSubmit {
+                            store.nameSpeaker(meeting.id, voice: voice, nameDraft)
+                            renaming = nil
+                        }
+                    Text("Changes the label on every line by this voice. The words are not touched.").font(.mmSub).foregroundStyle(Tokens.labelTertiary)
+                        .frame(width: 200, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Spacer()
+                        Button("Save") {
+                            store.nameSpeaker(meeting.id, voice: voice, nameDraft)
+                            renaming = nil
+                        }
+                        .buttonStyle(MurmurButtonStyle(kind: .primary, height: 28, fontSize: 12.5))
+                    }
+                }
+                .padding(14)
+            }
+        } else {
+            Text(label).font(.mmBodyEmphasis).foregroundStyle(line.speaker == .you ? Tokens.accentText : Tokens.labelSecondary)
+                .frame(width: width, alignment: .leading)
+        }
+    }
+
+    /// The rename popover hangs off the first line by that voice that was clicked; one anchor is enough.
+    private func isFirst(_ line: MeetingLine, of voice: Int, in meeting: Meeting) -> Bool {
+        renamingAnchor == line.id
+    }
+
     /// A recording without a transcript: in progress, or waiting after a failure or a quit.
     private func waiting(_ meeting: Meeting) -> some View {
         let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -563,6 +639,7 @@ struct MeetingsView: View {
     private func meta(_ meeting: Meeting) -> String {
         var parts = ["\(Self.day(meeting.date)) \(meeting.date.formatted(date: .omitted, time: .shortened))", Self.length(meeting.duration)]
         parts.append(meeting.includesCallAudio ? "microphone and call audio" : "microphone only")
+        if meeting.voiceCount > 0 { parts.append("\(meeting.voiceCount + 1) speakers") }
         if meeting.isTranscribed { parts.append("transcribed on this Mac") }
         return parts.joined(separator: " · ")
     }

@@ -82,6 +82,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         let meetings: MeetingStore
         let meeting: MeetingController
         let summaryModel: any LocalTextModel
+        var speakers: FluidSpeakerSeparator?
         if demo {
             summaryModel = DemoCleanup()
             meetings = MeetingStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("murmur-demo-meetings-\(UUID().uuidString)"))
@@ -111,7 +112,15 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
             catalog.onPrepareLanguage = { [weak self] in self?.prepareLanguage() }
             self.router = router
             meetings = MeetingStore()
-            meeting = MeetingController(audio: LiveMeetingAudio(), engine: router, store: meetings, settings: settings, permissions: LivePermissionsService())
+            let separator = FluidSpeakerSeparator()
+            separator.isOffline = { [settings] in settings?.offlineMode ?? false }
+            separator.onDownload = { [weak self] in
+                guard let self, self.settings.logsNetworkActivity else { return }
+                self.stores.network.record(host: "huggingface.co", reason: "Speaker model download", bytes: 22_000_000)
+            }
+            speakers = separator
+            meeting = MeetingController(
+                audio: LiveMeetingAudio(), engine: router, store: meetings, settings: settings, permissions: LivePermissionsService(), separator: separator)
 
             let hotkeys = LiveHotkeyService()
             hotkeys.onEvent = { [weak self] event in self?.handle(event) }
@@ -120,7 +129,7 @@ public final class MurmurApp: NSObject, NSApplicationDelegate {
         }
         stores = Stores(
             controller: controller, settings: settings, dictionary: dictionary, history: history, stats: stats, providers: providers,
-            network: network, catalog: catalog, meetings: meetings, meeting: meeting, summaryModel: summaryModel, isDemo: demo)
+            network: network, catalog: catalog, meetings: meetings, meeting: meeting, summaryModel: summaryModel, speakers: speakers, isDemo: demo)
         router?.apple.onAssetDownload = { [weak self] in
             guard let self, self.settings.logsNetworkActivity else { return }
             self.stores.network.record(host: "Apple (via macOS)", reason: "Speech language download", bytes: 0)

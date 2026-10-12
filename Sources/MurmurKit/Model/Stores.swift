@@ -14,11 +14,14 @@ public final class Stores {
     public let meetings: MeetingStore
     public let meeting: MeetingController
     public let summarizer: MeetingSummarizer
+    /// The speaker model, for its download state. Nil in the demo.
+    public let speakers: FluidSpeakerSeparator?
     /// True with `--demo`: simulated services and sample data.
     public let isDemo: Bool
     let overlay = OverlayPanelState()
 
-    public init(controller: DictationController, settings: SettingsStore, dictionary: DictionaryStore, history: HistoryStore, stats: StatsStore, providers: ProviderStore, network: NetworkLog, catalog: ModelCatalog, meetings: MeetingStore, meeting: MeetingController, summaryModel: (any LocalTextModel)?, isDemo: Bool) {
+    public init(controller: DictationController, settings: SettingsStore, dictionary: DictionaryStore, history: HistoryStore, stats: StatsStore, providers: ProviderStore, network: NetworkLog, catalog: ModelCatalog, meetings: MeetingStore, meeting: MeetingController, summaryModel: (any LocalTextModel)?, speakers: FluidSpeakerSeparator? = nil, isDemo: Bool) {
+        self.speakers = speakers
         self.controller = controller
         self.settings = settings
         self.dictionary = dictionary

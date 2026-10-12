@@ -155,6 +155,112 @@ private final class FakeMeetingAudio: MeetingAudioService {
         #expect(engine.calls == 0)
     }
 
+    // MARK: speakers
+
+    @Test func turnsAreJoinedTidiedAndNumberedInOrderOfFirstSpeaking() {
+        let pieces = SpeakerTurns.pieces([
+            SpeakerTurn(start: 20, end: 24, voice: 7),
+            SpeakerTurn(start: 5, end: 8, voice: 3),
+            // The same voice after a short breath: one turn.
+            SpeakerTurn(start: 8.3, end: 10, voice: 3),
+            // Too short to hold a word.
+            SpeakerTurn(start: 12, end: 12.1, voice: 9),
+            SpeakerTurn(start: 30, end: 31, voice: 3),
+        ])
+        #expect(pieces == [
+            SpeakerTurn(start: 5, end: 10, voice: 1), SpeakerTurn(start: 20, end: 24, voice: 2), SpeakerTurn(start: 30, end: 31, voice: 1),
+        ])
+        // A long monologue is cut into pieces the engine can take, all by the same voice.
+        let long = SpeakerTurns.pieces([SpeakerTurn(start: 0, end: 60, voice: 4)])
+        #expect(long.count == 3 && long.allSatisfy { $0.voice == 1 && $0.end - $0.start <= SpeechSegmenter.longest })
+        #expect(long.first?.start == 0 && long.last?.end == 60)
+        #expect(SpeakerTurns.pieces([]).isEmpty)
+    }
+
+    @Test func withTurnsEachLineCarriesItsVoiceAndWithoutThemTheCallIsOthers() async throws {
+        let call = MeetingFakeTrack.of([(5, false), (2, true), (1, false), (2, true)])
+        let turns = [SpeakerTurn(start: 5, end: 7, voice: 1), SpeakerTurn(start: 8, end: 10, voice: 2)]
+        let told = try await MeetingTranscriber.transcribe(
+            microphone: MeetingFakeTrack.of([(1, false), (2, true), (7, false)]), call: call, callTurns: turns, engine: MeetingFakeEngine(), onProgress: { _ in })
+        #expect(told.lines.map(\.speaker) == [.you, .others, .others] && told.lines.map(\.voice) == [nil, 1, 2])
+        let untold = try await MeetingTranscriber.transcribe(
+            microphone: nil, call: call, callTurns: nil, engine: MeetingFakeEngine(), onProgress: { _ in })
+        #expect(untold.lines.count == 2 && untold.lines.allSatisfy { $0.speaker == .others && $0.voice == nil })
+    }
+
+    @Test func namingASpeakerChangesTheLabelAndNeverTheWords() {
+        let store = MeetingStore(directory: directory())
+        var meeting = Meeting(title: "Sync", date: Date(), duration: 60, includesCallAudio: true)
+        let raw = [
+            MeetingLine(start: 1, speaker: .you, text: "um hello"), MeetingLine(start: 3, speaker: .others, voice: 1, text: "hi there"),
+            MeetingLine(start: 5, speaker: .others, voice: 2, text: "morning"), MeetingLine(start: 7, speaker: .others, text: "unknown voice"),
+        ]
+        meeting.setTranscript(raw, engine: "fake")
+        store.add(meeting)
+        #expect(raw.map { store.meeting(meeting.id)!.label(for: $0) } == ["You", "Speaker 1", "Speaker 2", "Others"])
+        #expect(store.meeting(meeting.id)?.voiceCount == 2)
+        store.nameSpeaker(meeting.id, voice: 1, "  Priya ")
+        var stored = store.meeting(meeting.id)!
+        #expect(raw.map { stored.label(for: $0) } == ["You", "Priya", "Speaker 2", "Others"] && stored.lines == raw)
+        #expect(stored.text { _ in "9:00" }.contains("9:00 Priya: hi there"))
+        // Survives a relaunch, and an empty name goes back to the number.
+        #expect(MeetingStore(directory: store.directory).meetings[0].speakerNames == ["1": "Priya"])
+        store.nameSpeaker(meeting.id, voice: 1, "")
+        stored = store.meeting(meeting.id)!
+        #expect(stored.label(for: raw[1]) == "Speaker 1" && stored.speakerNames == nil && stored.lines == raw)
+    }
+
+    @MainActor private final class FakeSeparator: SpeakerSeparator {
+        var isInstalled = true
+        var fails = false
+        var asked = 0
+        struct Broken: Error {}
+        func turns(in track: URL) async throws -> [SpeakerTurn] {
+            asked += 1
+            if fails { throw Broken() }
+            return [SpeakerTurn(start: 5, end: 7, voice: 1)]
+        }
+    }
+
+    private func separated(_ separator: FakeSeparator, settings change: (SettingsStore) -> Void = { _ in }) async -> Meeting {
+        let settings = SettingsStore(defaults: UserDefaults(suiteName: "murmur-tests-\(UUID().uuidString)")!)
+        change(settings)
+        let store = MeetingStore(directory: directory())
+        let controller = MeetingController(
+            audio: FakeMeetingAudio(), engine: MeetingFakeEngine(), store: store, settings: settings, permissions: DemoPermissions(), separator: separator
+        ) { url in
+            url.lastPathComponent == "call.caf" ? MeetingFakeTrack.of([(5, false), (2, true), (1, false)]) : MeetingFakeTrack.of([(1, false), (2, true), (5, false)])
+        }
+        controller.start()
+        controller.stop()
+        await controller.pendingWork?.value
+        Accent.current = .ice
+        #expect(!controller.isSeparatingSpeakers && controller.state == .idle)
+        return store.meetings[0]
+    }
+
+    @Test func aCallIsToldApartWhenTheModelIsThereAndTheSettingIsOn() async {
+        let separator = FakeSeparator()
+        let meeting = await separated(separator)
+        #expect(separator.asked == 1 && meeting.lines.map(\.voice) == [nil, 1] && meeting.voiceCount == 1)
+    }
+
+    @Test func withoutTheModelOrWithTheSettingOffOrOnFailureTheCallIsStillTranscribed() async {
+        let missing = FakeSeparator()
+        missing.isInstalled = false
+        var meeting = await separated(missing)
+        #expect(missing.asked == 0 && meeting.isTranscribed && meeting.lines.map(\.speaker) == [.you, .others] && meeting.voiceCount == 0)
+
+        let off = FakeSeparator()
+        meeting = await separated(off) { $0.meetingSpeakers = false }
+        #expect(off.asked == 0 && meeting.isTranscribed && meeting.voiceCount == 0)
+
+        let broken = FakeSeparator()
+        broken.fails = true
+        meeting = await separated(broken)
+        #expect(broken.asked == 1 && meeting.isTranscribed && meeting.lines.count == 2 && meeting.voiceCount == 0)
+    }
+
     // MARK: the store
 
     @Test func theRawTranscriptIsWrittenOnceAndNeverReplaced() {

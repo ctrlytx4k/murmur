@@ -167,7 +167,7 @@ public final class MeetingSummarizer {
             state = .failed(id: id, message: "\(provider.name) needs your OK before any text is sent to it.")
             return
         }
-        let lines = meeting.lines.map { line in "\(line.speaker.map { "\($0.label): " } ?? "")\(line.text)" }
+        let lines = meeting.lines.map { line in "\(meeting.label(for: line).map { "\($0): " } ?? "")\(line.text)" }
         state = .working(id: id, step: 0, of: 1)
         pendingWork = Task { [weak self] in
             guard let self else { return }
