@@ -345,6 +345,14 @@ struct Harness {
         #expect(await h.becomesIdle())
     }
 
+    @Test func didntCatchAnythingGoesAwaySoonerThanAnErrorThatNeedsReading() {
+        #expect(DictationController.hold(for: .nothingHeard, standard: .seconds(8)) == .milliseconds(2500))
+        #expect(DictationController.hold(for: .microphoneDenied, standard: .seconds(8)) == .seconds(8))
+        #expect(DictationController.hold(for: .secureInput, standard: .seconds(8)) == .seconds(8))
+        // Never longer than the standard hold.
+        #expect(DictationController.hold(for: .nothingHeard, standard: .milliseconds(20)) == .milliseconds(20))
+    }
+
     @Test func undoIsOfferedOnceAndCopyUsesTheLastText() async {
         let h = Harness()
         h.controller.start()

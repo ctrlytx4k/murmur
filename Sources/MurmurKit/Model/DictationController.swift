@@ -410,7 +410,13 @@ public final class DictationController {
     private func fail(_ error: DictationError, ifStill token: Int? = nil) {
         if let token, token != stateToken { return }
         let held = set(.error(error))
-        returnToIdle(after: errorHold, ifStill: held)
+        returnToIdle(after: Self.hold(for: error, standard: errorHold), ifStill: held)
+    }
+
+    /// How long an error card stays before it goes away by itself. "Didn't catch anything" asks nothing of the
+    /// user and often follows a slip on the shortcut, so it only stays long enough to read.
+    static func hold(for error: DictationError, standard: Duration) -> Duration {
+        error == .nothingHeard ? min(standard, .milliseconds(2500)) : standard
     }
 
     private func returnToIdle(after delay: Duration, ifStill token: Int) {
